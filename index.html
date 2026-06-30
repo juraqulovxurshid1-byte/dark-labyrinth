@@ -854,19 +854,17 @@ function showGameOver(){
   overlay.style.display='flex';
 }
 
-// Replace this placeholder with your exact Monetag Rewarded Interstitial call.
-// Example after Monetag gives you a function: return show_1234567({requestVar:'revive'});
 function showRewardedAdForRevive(){
-  if(typeof window.showRewardedAdForRevive==='function'){
-    return window.showRewardedAdForRevive({requestVar:'revive', reward:'revive'});
+  try {
+    // 1. Open your Monetag Direct Link in a new tab to trigger the ad layout
+    window.open('https://omg10.com/4/11221132', '_blank');
+    
+    // 2. Return a resolved promise so watchAdToRevive() immediately triggers revivePlayer()
+    return Promise.resolve();
+  } catch (e) {
+    // Fallback if a aggressive popup blocker completely halts window.open
+    return Promise.reject(new Error('Popup blocked! Please allow popups to revive.'));
   }
-  if(typeof window.monetagRewardedAd==='function'){
-    return window.monetagRewardedAd({requestVar:'revive', reward:'revive'});
-  }
-  if(typeof window.adHandler==='function'){
-    return window.adHandler({requestVar:'revive', reward:'revive'});
-  }
-  return Promise.reject(new Error('Rewarded ad is not connected yet. Add your Monetag Rewarded Interstitial code.'));
 }
 
 function watchAdToRevive(){
