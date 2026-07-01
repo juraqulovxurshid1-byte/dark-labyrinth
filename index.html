@@ -176,6 +176,20 @@ exitDoorImg.src = 'data:image/png;base64,' + EXIT_DOOR_B64;
 // Scare audio element
 const scareAudio = new Audio('data:audio/mp3;base64,' + SCARE_B64);
 scareAudio.volume = 0.9;
+let scareAudioBuffer = null;
+let scareAudioSource = null;
+let scareAudioPlayingUntil = 0;
+let outOfSightTimer = 0;
+
+function base64ToArrayBuffer(base64) {
+  const binaryString = window.atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
 
 // ═══ WEB AUDIO ═══
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -183,6 +197,46 @@ let audioCtx;
 function ensureAudio(){
   if(!audioCtx) audioCtx = new AudioCtx();
   if(audioCtx.state==='suspended') audioCtx.resume();
+  if(!scareAudioBuffer && typeof SCARE_B64 !== 'undefined'){
+    try {
+      const arrayBuf = base64ToArrayBuffer(SCARE_B64);
+      audioCtx.decodeAudioData(arrayBuf.slice(0), buffer => {
+        scareAudioBuffer = buffer;
+      }, () => {});
+    } catch(e){}
+  }
+}
+
+function playInstantScareVoice() {
+  const nowSec = performance.now() / 1000;
+  if (nowSec < scareAudioPlayingUntil) return;
+  outOfSightTimer = 0;
+  if (audioCtx && scareAudioBuffer) {
+    try {
+      if (scareAudioSource) { try { scareAudioSource.stop(); } catch(e){} }
+      scareAudioSource = audioCtx.createBufferSource();
+      scareAudioSource.buffer = scareAudioBuffer;
+      const gain = audioCtx.createGain();
+      gain.gain.value = 0.9;
+      scareAudioSource.connect(gain);
+      gain.connect(audioCtx.destination);
+      scareAudioSource.start(0);
+      scareAudioPlayingUntil = nowSec + scareAudioBuffer.duration;
+      return;
+    } catch(e){}
+  }
+  if (scareAudio && (scareAudio.paused || scareAudio.ended)) {
+    scareAudio.currentTime = 0;
+    scareAudio.play().catch(()=>{});
+    scareAudioPlayingUntil = nowSec + (scareAudio.duration || 1.5);
+  }
+}
+
+function stopScareVoice() {
+  scareAudioPlayingUntil = 0;
+  outOfSightTimer = 0;
+  if (scareAudioSource) { try { scareAudioSource.stop(); } catch(e){} scareAudioSource = null; }
+  if (scareAudio) { scareAudio.pause(); scareAudio.currentTime = 0; }
 }
 function playTone(freq,type,vol,dur,t){
   if(!audioCtx||vol<0.002) return;
@@ -741,16 +795,16 @@ function drawGame(){
   const nowSec=performance.now()/1000;
   let anyVisible=false;
   for(const m of monsters){
-    const d=Math.hypot(m.x-player.x,m.y-player.y);
-    const nv = !inVent && d<LIGHT_RADIUS+0.9
-            && lineOfSight(player.x,player.y,m.x,m.y);
-    // Scare voice: fires the instant you gain line of sight on a monster.
+    const pcx = Math.floor(player.px / CELL), pcy = Math.floor(player.py / CELL);
+    const mcx = Math.floor(m.px / CELL), mcy = Math.floor(m.py / CELL);
+    const d = Math.hypot((m.px - player.px) / CELL, (m.py - player.py) / CELL);
+    const nv = !inVent && d < LIGHT_RADIUS + 0.9 && lineOfSight(pcx, pcy, mcx, mcy);
+    // Scare voice: fires the exact instant you gain line of sight on a monster.
     // Per-monster cooldown so a newly-spotted one still screams.
     if(nv){
       anyVisible=true;
-      if(!m.seen && nowSec>=m.scareReadyAt && (scareAudio.paused||scareAudio.ended)){
-        scareAudio.currentTime=0;
-        scareAudio.play().catch(()=>{});
+      if(!m.seen && nowSec>=m.scareReadyAt){
+        playInstantScareVoice();
       }
     } else if(m.seen){
       m.scareReadyAt=nowSec+SCARE_COOLDOWN;
@@ -772,8 +826,15 @@ function drawGame(){
     ctx.drawImage(monsterImg,mx-sz/2,my-sz/2,sz,sz);
     ctx.restore();
   }
-  // cut the scream once no monster is in sight
-  if(!anyVisible){ scareAudio.pause(); scareAudio.currentTime=0; }
+  // cut the scream once no monster is in sight (grace period prevents micro-flicker clipping)
+  if(!anyVisible){
+    if (scareAudioPlayingUntil > 0) {
+      if (!outOfSightTimer) outOfSightTimer = nowSec;
+      else if (nowSec - outOfSightTimer > 0.45) { stopScareVoice(); }
+    }
+  } else {
+    outOfSightTimer = 0;
+  }
   // Fog of war
   const fog=ctx.createRadialGradient(ppx,ppy,0,ppx,ppy,LIGHT_RADIUS*CELL);
   fog.addColorStop(0,'rgba(0,0,0,0)');
@@ -1109,7 +1170,7 @@ function revivePlayer(){
   monsterProximity=0;
   moveMonstersAwayFromPlayer();
   overlay.style.display='none';
-  if(scareAudio){ scareAudio.pause(); scareAudio.currentTime=0; }
+  stopScareVoice();
   lastTime=performance.now();
 }
 
