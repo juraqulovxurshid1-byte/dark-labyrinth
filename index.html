@@ -1071,7 +1071,11 @@ function watchAdToRevive(){
   if(btn){ btn.disabled=true; btn.textContent='LOADING AD...'; }
   if(status) status.textContent='Please watch the full ad to revive.';
   showRewardedAdForRevive().then(()=>{
-    revivePlayer();
+   overlay.innerHTML = `
+      <h1>AD COMPLETE</h1>
+      <p>Ready to jump back into the dark?</p>
+      <button class="btn" onclick="resumeFromAd()">TAP TO RESUME</button>
+    `;
   }).catch(err=>{
     reviveInProgress=false;
     if(btn){ btn.disabled=false; btn.textContent='WATCH AD TO REVIVE'; }
@@ -1099,7 +1103,25 @@ function moveMonstersAwayFromPlayer(){
     m.seen=false; m.scareReadyAt=performance.now()/1000+SCARE_COOLDOWN;
   }
 }
-
+async function resumeFromAd() {
+  const isPhone = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (isPhone) {
+    try {
+      const element = document.documentElement;
+      if (element.requestFullscreen) {
+        await element.requestFullscreen();
+      }
+      if (screen.orientation && screen.orientation.lock) {
+        await screen.orientation.lock("landscape");
+      }
+    } catch (e) {
+      console.log("Could not restore fullscreen/orientation", e);
+    }
+  }
+  await waitForStableViewport();
+  revivePlayer();
+  resizeGame('resume-from-ad');
+}
 function revivePlayer(){
   isDead=false; isWon=false; deathAnimTimer=0; reviveInProgress=false;
   reviveInvincibleTimer=3.0;
