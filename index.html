@@ -705,7 +705,7 @@ function placeVents(){
 }
 function tryToggleVent(){
   if(isDead||isWon) return;
-  if(inVent){ emerge(); return; }                                  // E while inside = exit here
+  if(inVent){ confirmVentSelection(); return; }                                  // Travel to selected vent or exit if current
   const idx=vents.findIndex(v=>v.x===player.x&&v.y===player.y);
   if(idx>=0) enterVent(idx);
 }
@@ -820,7 +820,15 @@ function drawVentPrompt(){
 function updateVentButton(){
   if(!isTouch||!gameRunning){ ventBtn.classList.remove('show'); return; }
   if(isDead||isWon){ ventBtn.classList.remove('show'); return; }
-  if(inVent){ ventBtn.textContent='EXIT VENT'; ventBtn.classList.add('show'); return; }
+  if(inVent){
+    if (ventSel !== currentVentIndex) {
+      ventBtn.textContent = 'GO TO VENT ' + String.fromCharCode(65 + ventSel);
+    } else {
+      ventBtn.textContent = 'EXIT VENT';
+    }
+    ventBtn.classList.add('show');
+    return;
+  }
   if(vents.some(v=>v.x===player.x&&v.y===player.y)){ ventBtn.textContent='ENTER VENT'; ventBtn.classList.add('show'); }
   else ventBtn.classList.remove('show');
 }
@@ -1309,6 +1317,24 @@ joy.addEventListener('mousedown',e=>{ensureAudio();joyActive=true;joyUpdate(e.cl
 window.addEventListener('mousemove',e=>{if(joyActive)joyUpdate(e.clientX,e.clientY);});
 window.addEventListener('mouseup',()=>{if(joyActive){joyActive=false;joyReset();}});
 
+function checkVentMenuTap(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleY = canvas.height / rect.height;
+  const cy = (clientY - rect.top) * scaleY;
+  const lineH = Math.round(CELL * 0.95);
+  const ph = 72 + vents.length * lineH + 54;
+  const py = (canvas.height - ph) / 2;
+  for (let i = 0; i < vents.length; i++) {
+    const rowTop = py + 72 + i * lineH;
+    if (cy >= rowTop - lineH * 0.3 && cy <= rowTop + lineH * 0.7) {
+      ventSel = i;
+      confirmVentSelection();
+      return;
+    }
+  }
+  confirmVentSelection();
+}
+
 let swipeStart=null;
 window.addEventListener('touchstart',e=>{
   if(e.target.id==='joystick'||e.target.id==='joyKnob'||e.target.id==='ventBtn') return;
@@ -1319,7 +1345,9 @@ window.addEventListener('touchend',e=>{
   const dx=e.changedTouches[0].clientX-swipeStart.x;
   const dy=e.changedTouches[0].clientY-swipeStart.y;
   swipeStart=null;
-  if(Math.abs(dx)<12&&Math.abs(dy)<12){ if(ventMenuOpen) confirmVentSelection(); return; }
+  if(Math.abs(dx)<12&&Math.abs(dy)<12){
+    if(ventMenuOpen){ checkVentMenuTap(e.changedTouches[0].clientX, e.changedTouches[0].clientY); return; }
+  }
   ensureAudio();
   if(Math.abs(dx)>Math.abs(dy)) touchDir=dx>0?'right':'left';
   else touchDir=dy>0?'down':'up';
@@ -1347,5 +1375,5 @@ if(window.visualViewport){
   window.visualViewport.addEventListener('resize', ()=>resizeGame('visualViewport'));
 }
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a147cf7fe8e3348f',t:'MTc4MjkzNDA3Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
