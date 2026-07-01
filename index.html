@@ -262,7 +262,6 @@ function initLevel(){
   visited=Array.from({length:mazeH},()=>Array(mazeW).fill(false));
   visited[1][1]=true;
 
-  canvas.width=mazeW*CELL; canvas.height=mazeH*CELL;
   mmCvs.width=MM_RES; mmCvs.height=MM_RES;
   buildWallLayer();
   positionMinimap();
