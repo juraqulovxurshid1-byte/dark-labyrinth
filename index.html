@@ -9,27 +9,24 @@
   *{margin:0;padding:0;box-sizing:border-box;}
   body{
     background:#000;
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    width:100vw;
-    height:100vh;
+    width:100%;
+    height:100%;
     overflow:hidden;
     font-family:'Courier New',monospace;
     color:#fff;
     touch-action:none;
 }
+  html, body {
+    margin:0;
+    padding:0;
+  }
   #wrapper {
-    position: relative;
-
-    aspect-ratio: 16 / 9;
-
-    width: min(100vw, calc(100vh * 16 / 9));
-    height: min(100vh, calc(100vw * 9 / 16));
-
-    margin: auto;
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
     overflow: hidden;
-}
+  }
   #gameCanvas {
   display: block;
   width: 100%;
@@ -116,6 +113,53 @@ ventBtn.addEventListener('click',e=>{ e.preventDefault(); e.stopPropagation(); e
 
 let maze,mazeW,mazeH,player,monsters=[],level=1,visited;
 let gameRunning=false,lastTime=0,keys={},touchDir=null,touchVec=null;
+let __dbgFrameCount=0;
+const VIEW_ASPECT=16/9;
+
+function __dbgLog(location,message,data,hypothesisId){
+  const payload={sessionId:'a6dde7',location,message,data,timestamp:Date.now(),hypothesisId,runId:'post-fix-v2'};
+  fetch('http://127.0.0.1:7671/ingest/94b48c54-41bd-4e08-840c-17fc23a8f658',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a6dde7'},body:JSON.stringify(payload)}).catch(()=>{});
+  try{
+    const k='debug-a6dde7';
+    const logs=JSON.parse(sessionStorage.getItem(k)||'[]');
+    logs.push(payload);
+    sessionStorage.setItem(k,JSON.stringify(logs.slice(-80)));
+  }catch(e){}
+}
+
+function getViewportSize(){
+  const vv=window.visualViewport;
+  return {
+    w:vv?vv.width:window.innerWidth,
+    h:vv?vv.height:window.innerHeight,
+    offsetTop:vv?vv.offsetTop:0,
+    offsetLeft:vv?vv.offsetLeft:0
+  };
+}
+
+function fitAspect(maxW,maxH,aspect){
+  let width=maxW,height=maxH;
+  if(width/height>aspect) width=height*aspect;
+  else height=width/aspect;
+  return {width,height};
+}
+
+async function waitForStableViewport(stableMs=120,maxWait=2500){
+  let lastKey='',stableAt=0;
+  const t0=performance.now();
+  while(performance.now()-t0<maxWait){
+    const {w,h}=getViewportSize();
+    const key=w+'x'+h;
+    if(key===lastKey){
+      if(performance.now()-stableAt>=stableMs) return getViewportSize();
+    }else{
+      lastKey=key;
+      stableAt=performance.now();
+    }
+    await new Promise(r=>requestAnimationFrame(r));
+  }
+  return getViewportSize();
+}
 let monsterProximity=0,monsterStepTimer=0,playerMoving=false;
 let deathAnimTimer=0,isDead=false,isWon=false,hbTimer=0;
 let reviveInvincibleTimer=0, reviveFreezeTimer=0, reviveInProgress=false;
@@ -264,6 +308,9 @@ function initLevel(){
   mmCvs.width=MM_RES; mmCvs.height=MM_RES;
   buildWallLayer();
   positionMinimap();
+  // #region agent log
+  (function(){const wr=wrap.getBoundingClientRect();const vp=getViewportSize();__dbgLog('index.html:initLevel','after initLevel sizing',{level,mazeW,mazeH,canvasW:canvas.width,canvasH:canvas.height,wrapperW:wr.width,wrapperH:wr.height,wrapperTop:wr.top,wrapperLeft:wr.left,overflowX:wr.right-vp.w-vp.offsetLeft,overflowY:wr.bottom-vp.h-vp.offsetTop,innerW:window.innerWidth,innerH:window.innerHeight,vpW:vp.w,vpH:vp.h,matchCount:window.__matchCount||0},'B');})();
+  // #endregion
 
   isDead=false; isWon=false; deathAnimTimer=0;
   reviveInvincibleTimer=0; reviveFreezeTimer=0; reviveInProgress=false;
@@ -860,6 +907,11 @@ function positionMinimap(){
     top:hs-mmSize-margin
   }
 };
+  if(!player){
+    mmCvs.style.left=corners.tr.left+'px';
+    mmCvs.style.top=corners.tr.top+'px';
+    return;
+  }
   const scaleX = ws / canvas.width;
   const scaleY = hs / canvas.height;
   const sx = player.px * scaleX;
@@ -903,7 +955,7 @@ function checkEvents(){
   }
   if(player.x===mazeW-2&&player.y===mazeH-2){
     isWon=true; playWin();
-    setTimeout(()=>{level++;initLevel();},2100);
+    setTimeout(()=>{level++;initLevel();resizeGame('level-win');},2100);
   }
 }
 
@@ -920,30 +972,30 @@ function loop(ts){
   drawMinimap();
   positionMinimap();
   updateVentButton();
+  // #region agent log
+  if(__dbgFrameCount<3){__dbgFrameCount++;const wr=wrap.getBoundingClientRect();const vp=getViewportSize();__dbgLog('index.html:loop','early frame layout',{frame:__dbgFrameCount,canvasW:canvas.width,canvasH:canvas.height,wrapperW:wr.width,wrapperH:wr.height,overflowX:wr.right-vp.w-vp.offsetLeft,overflowY:wr.bottom-vp.h-vp.offsetTop,innerW:window.innerWidth,innerH:window.innerHeight,vpW:vp.w,vpH:vp.h,matchCount:window.__matchCount||0},'C');}
+  // #endregion
   requestAnimationFrame(loop);
 }
-function resizeGame() {
+function resizeGame(source) {
     const wrapper = document.getElementById("wrapper");
     const canvas = document.getElementById("gameCanvas");
-    const aspect = 16 / 9;
-    let width = window.innerWidth;
-    let height = window.innerHeight;
-    if (width / height > aspect) {
-        width = height * aspect;
-    } else {
-        height = width / aspect;
-    }
-    wrapper.style.width = width + "px";
-    wrapper.style.height = height + "px";
-    canvas.width = width;
-    canvas.height = height;
-    console.log(
-    window.innerWidth,
-    window.innerHeight
-    );
+    const vp = getViewportSize();
+    const fit = fitAspect(vp.w, vp.h, VIEW_ASPECT);
+    wrapper.style.width = Math.floor(fit.width) + "px";
+    wrapper.style.height = Math.floor(fit.height) + "px";
+    positionMinimap();
+    const wr = wrapper.getBoundingClientRect();
+    // #region agent log
+    __dbgLog('index.html:resizeGame','resizeGame called',{source:source||'unknown',calcW:fit.width,calcH:fit.height,canvasW:canvas.width,canvasH:canvas.height,wrapperW:wr.width,wrapperH:wr.height,wrapperOverflowX:wr.right-vp.w-vp.offsetLeft,wrapperOverflowY:wr.bottom-vp.h-vp.offsetTop,innerW:window.innerWidth,innerH:window.innerHeight,vpW:vp.w,vpH:vp.h,matchCount:window.__matchCount||0},'A');
+    // #endregion
 }
   
 async function startGame() {
+    window.__matchCount=(window.__matchCount||0)+1;
+    // #region agent log
+    __dbgLog('index.html:startGame','startGame begin',{matchCount:window.__matchCount,innerW:window.innerWidth,innerH:window.innerHeight,...getViewportSize()},'A');
+    // #endregion
     const isPhone =
         /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     if (isPhone) {
@@ -968,22 +1020,24 @@ async function startGame() {
                     window.addEventListener("resize", finish, { once:true });
                     setTimeout(finish, 1000);
                 });
-                resizeGame();
+                resizeGame('orientation-lock');
             }
         } catch (e) {
             console.log(e);
         }
     }
-    await new Promise(resolve => setTimeout(resolve, 700));
-    resizeGame();
-    setTimeout(resizeGame, 1000);
-    setTimeout(resizeGame, 1500);
+    await waitForStableViewport();
+    resizeGame('viewport-stable');
     ensureAudio();
     level = 1;
     overlay.style.display = "none";
     initLevel();
+    resizeGame('post-initLevel');
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    resizeGame('post-double-raf');
     gameRunning = true;
     lastTime = performance.now();
+    __dbgFrameCount=0;
     requestAnimationFrame(loop);
 }
 function showGameOver(){
@@ -1058,10 +1112,17 @@ function revivePlayer(){
 }
 
 function restartGame(){
+  window.__matchCount=(window.__matchCount||0)+1;
+  // #region agent log
+  __dbgLog('index.html:restartGame','restartGame called',{matchCount:window.__matchCount,innerW:window.innerWidth,innerH:window.innerHeight,...getViewportSize()},'D');
+  // #endregion
   ensureAudio(); level=1;
   reviveInvincibleTimer=0; reviveFreezeTimer=0; reviveInProgress=false;
   overlay.style.display='none';
-  initLevel(); lastTime=performance.now();
+  initLevel();
+  resizeGame('restart');
+  lastTime=performance.now();
+  __dbgFrameCount=0;
 }
 
 // ═══ INPUT ═══
@@ -1146,10 +1207,14 @@ function drawNoise(){
   nc2d.putImageData(img,0,0);
 }
 setInterval(drawNoise,80);
-window.addEventListener("resize", resizeGame);
+resizeGame('page-load');
+window.addEventListener("resize", ()=>resizeGame('window-resize'));
 window.addEventListener("orientationchange", () => {
-    setTimeout(resizeGame, 300);
+    setTimeout(()=>resizeGame('orientationchange-300'), 300);
 });
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', ()=>resizeGame('visualViewport'));
+}
 </script>
 <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
