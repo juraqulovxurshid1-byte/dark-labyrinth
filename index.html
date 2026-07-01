@@ -840,22 +840,36 @@ let mmCorner='tr';   // sticky so the map doesn't jitter between corners
 function positionMinimap(){
   const r=wrap.getBoundingClientRect();
   const ws=r.width;
+  const hs=r.height;
   if(!ws) return;
-  // responsive display size (now circular, a bit smaller)
   const mmSize=Math.max(92,Math.min(MM_DISPLAY,ws*0.26));
   mmCvs.style.width=mmSize+'px';
   mmCvs.style.height=mmSize+'px';
   const margin=10;
-  // allowed corners + each one's center (bottom-left is off-limits: joystick lives there)
   const corners={
-    tl:{cx:margin+mmSize/2,     cy:margin+mmSize/2,     left:margin,           top:margin},
-    tr:{cx:ws-margin-mmSize/2,  cy:margin+mmSize/2,     left:ws-mmSize-margin, top:margin},
-    br:{cx:ws-margin-mmSize/2,  cy:ws-margin-mmSize/2,  left:ws-mmSize-margin, top:ws-mmSize-margin}
-  };
-  const scale=ws/canvas.width;
-  const sx=player.px*scale, sy=player.py*scale;   // player's on-screen position
-  // pick the allowed corner farthest from the player; keep the current one unless
-  // another is clearly better (hysteresis prevents flipping near the boundaries)
+  tl:{
+    cx:margin+mmSize/2,
+    cy:margin+mmSize/2,
+    left:margin,
+    top:margin
+  },
+  tr:{
+    cx:ws-margin-mmSize/2,
+    cy:margin+mmSize/2,
+    left:ws-mmSize-margin,
+    top:margin
+  },
+  br:{
+    cx:ws-margin-mmSize/2,
+    cy:hs-margin-mmSize/2,
+    left:ws-mmSize-margin,
+    top:hs-mmSize-margin
+  }
+};
+  const scaleX = ws / canvas.width;
+  const scaleY = hs / canvas.height;
+  const sx = player.px * scaleX;
+  const sy = player.py * scaleY;
   let best=mmCorner, bestD=Math.hypot(corners[mmCorner].cx-sx,corners[mmCorner].cy-sy);
   for(const key in corners){
     const c=corners[key];
