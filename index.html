@@ -957,13 +957,27 @@ async function startGame() {
                 screen.orientation.lock
             ) {
                await screen.orientation.lock("landscape");
+               await new Promise(resolve => {
+                    let done = false;
+
+                    const finish = () => {
+                       if(done) return;
+                       done = true;
+                       resolve();
+                    };
+                    window.addEventListener("resize", finish, { once:true });
+                    setTimeout(finish, 1000);
+                });
+                resizeGame();
             }
         } catch (e) {
             console.log(e);
         }
     }
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, 700));
     resizeGame();
+    setTimeout(resizeGame, 1000);
+    setTimeout(resizeGame, 1500);
     ensureAudio();
     level = 1;
     overlay.style.display = "none";
