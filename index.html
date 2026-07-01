@@ -14,8 +14,23 @@
 </script><style>
   *{margin:0;padding:0;box-sizing:border-box;}
   body{background:#000;display:flex;align-items:center;justify-content:center;height:100vh;overflow:hidden;font-family:'Courier New',monospace;color:#fff;touch-action:none;}
-  #wrapper{position:relative;width:min(100vw,100vh);height:min(100vw,100vh);max-width:620px;max-height:620px;}
-  #gameCanvas{display:block;width:100%;height:100%;image-rendering:pixelated;}
+  #wrapper {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+}
+  #gameCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  object-fit: contain;
+}
   #minimap{position:absolute;left:0;top:0;border:1px solid rgba(255,100,0,0.45);background:#000;image-rendering:pixelated;border-radius:50%;overflow:hidden;transition:left .22s ease,top .22s ease;box-shadow:0 0 14px rgba(0,0,0,0.65);}
   #hud{position:absolute;top:10px;right:10px;text-align:right;font-size:13px;color:#f84;text-shadow:0 0 8px #f84;}
   #overlay{position:absolute;inset:0;background:rgba(0,0,0,0.93);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center;padding:20px;}
