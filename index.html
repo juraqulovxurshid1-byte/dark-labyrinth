@@ -465,6 +465,11 @@ function buildWallLayer(){
   wallLayer.width=canvas.width;
   wallLayer.height=canvas.height;
   const w=wallLayer.getContext('2d');
+  const scaleX = canvas.width / (mazeW * CELL);
+  const scaleY = canvas.height / (mazeH * CELL);
+  const scale = Math.min(scaleX, scaleY);
+  
+  w.scale(scale, scale);
   // floor base (same dark color as before)
   w.fillStyle='#07070b';
   w.fillRect(0,0,wallLayer.width,wallLayer.height);
@@ -667,6 +672,13 @@ function drawGame(){
   const vW=canvas.width,vH=canvas.height;
   ctx.clearRect(0,0,vW,vH);
 
+  // Scale to fit maze on screen
+  const scaleX = vW / (mazeW * CELL);
+  const scaleY = vH / (mazeH * CELL);
+  const scale = Math.min(scaleX, scaleY);
+  
+  ctx.save();
+  ctx.scale(scale, scale);
   // Pre-rendered textured walls + floor
   ctx.drawImage(wallLayer,0,0);
 
