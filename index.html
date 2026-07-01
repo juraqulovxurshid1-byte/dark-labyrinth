@@ -831,8 +831,7 @@ function drawMinimap(){
 }
 
 // ═══ POSITION MINIMAP — parks in the corner farthest from the player,
-// but NEVER the bottom-left (that corner is reserved for the joystick) ═══
-let mmCorner='tr';   // sticky so the map doesn't jitter between corners
+let mmCorner='tr';   
 function positionMinimap(){
   const r=wrap.getBoundingClientRect();
   const ws=r.width;
@@ -1148,34 +1147,22 @@ function drawNoise(){
   nc2d.putImageData(img,0,0);
 }
 setInterval(drawNoise,80);
+
+// --- CLEANED UP RESIZE LOGIC ---
 window.addEventListener("resize", resizeGame);
 window.addEventListener("orientationchange", () => {
     setTimeout(resizeGame, 300);
 });
-let stabilizerCount = 0;
-const layoutStabilizer = setInterval(() => {
-    if (typeof resizeGame === "function") {
-        resizeGame();
-    }
-    stabilizerCount++;
-    if (stabilizerCount >= 10) { 
-        clearInterval(layoutStabilizer); 
-    }
-}, 400);
-const firstInteractionFlex = () => {
-    if (typeof resizeGame === "function") {
-        resizeGame();
-    }
-};
-window.addEventListener("click", () => {
-    setTimeout(firstInteractionFlex, 100);
-    setTimeout(firstInteractionFlex, 600); 
-}, { once: true });
 
-window.addEventListener("touchstart", () => {
-    setTimeout(firstInteractionFlex, 100);
-    setTimeout(firstInteractionFlex, 600);
-}, { once: true });
+// Run this once when the page is fully loaded to ensure the canvas "snaps" to the wrapper
+window.addEventListener("load", () => {
+    resizeGame(); 
+    setTimeout(resizeGame, 500); // The "snap-to-fit" delay
+});
+
+const firstInteractionFlex = () => { resizeGame(); };
+window.addEventListener("click", firstInteractionFlex, { once: true });
+window.addEventListener("touchstart", firstInteractionFlex, { once: true });
 </script>
 <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
