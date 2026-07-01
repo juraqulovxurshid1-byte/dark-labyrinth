@@ -911,6 +911,10 @@ function checkEvents(){
 
 // ═══ MAIN LOOP ═══
 function loop(ts){
+  if (canvas.width !== wrapper.clientWidth || canvas.height !== wrapper.clientHeight) {
+        if (typeof resizeGame === "function") resizeGame();
+        if (typeof computeVisibility === "function") computeVisibility();
+  }
   if(!gameRunning) return;
   const dt=Math.min((ts-lastTime)/1000,0.1);
   lastTime=ts;
@@ -1148,38 +1152,15 @@ function drawNoise(){
   nc2d.putImageData(img,0,0);
 }
 setInterval(drawNoise,80);
-// 🧠 Smart, self-correcting layout controller
-function bulletproofResize() {
+window.addEventListener("resize", () => {
     if (typeof resizeGame === "function") resizeGame();
     if (typeof computeVisibility === "function") computeVisibility();
-}
-window.addEventListener("resize", () => {
-    bulletproofResize();
-    setTimeout(bulletproofResize, 150);
 });
 window.addEventListener("orientationchange", () => {
-    setTimeout(bulletproofResize, 300);
-});
-window.addEventListener("load", () => {
-    setTimeout(bulletproofResize, 50);
-    setTimeout(bulletproofResize, 200);
-    setTimeout(bulletproofResize, 600); 
-});
-window.addEventListener("click", () => {
-    setTimeout(bulletproofResize, 50);
-    setTimeout(bulletproofResize, 200);
-}, { once: true });
-window.addEventListener("touchstart", () => {
-    setTimeout(bulletproofResize, 50);
-    setTimeout(bulletproofResize, 200);
-}, { once: true });
-window.addEventListener("load", () => {
     setTimeout(() => {
-        resizeGame();
-        if (typeof computeVisibility === "function") {
-            computeVisibility();
-        }
-    }, 100); 
+        if (typeof resizeGame === "function") resizeGame();
+        if (typeof computeVisibility === "function") computeVisibility();
+    }, 200);
 });
 </script>
 <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
