@@ -1157,7 +1157,7 @@ window.addEventListener("orientationchange", () => {
 // Run this once when the page is fully loaded to ensure the canvas "snaps" to the wrapper
 window.addEventListener("load", () => {
     resizeGame(); 
-    setTimeout(resizeGame, 500); // The "snap-to-fit" delay
+    setTimeout(resizeGame, 1000); // The "snap-to-fit" delay
 });
 
 const firstInteractionFlex = () => { resizeGame(); };
