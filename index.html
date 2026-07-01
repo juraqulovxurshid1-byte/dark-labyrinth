@@ -101,6 +101,8 @@ const NUM_VENTS        = 5;    // vents per level (connected hide + travel netwo
 
 // ═══ GLOBALS ═══
 const canvas  = document.getElementById('gameCanvas');
+canvas.width = 1280; 
+canvas.height = 720;
 const ctx     = canvas.getContext('2d');
 const mmCvs   = document.getElementById('minimap');
 const mmCtx   = mmCvs.getContext('2d');
