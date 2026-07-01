@@ -999,31 +999,13 @@ async function startGame() {
     const isPhone =
         /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     if (isPhone) {
-        try {
-            const element = document.documentElement;
-            if (element.requestFullscreen) {
-                await element.requestFullscreen();
-            }
-            if (
-                screen.orientation &&
-                screen.orientation.lock
-            ) {
-               await screen.orientation.lock("landscape");
-               await new Promise(resolve => {
-                    let done = false;
-
-                    const finish = () => {
-                       if(done) return;
-                       done = true;
-                       resolve();
-                    };
-                    window.addEventListener("resize", finish, { once:true });
-                    setTimeout(finish, 1000);
-                });
-                resizeGame('orientation-lock');
-            }
-        } catch (e) {
-            console.log(e);
+        const element = document.documentElement;
+        const rfs = element.requestFullscreen || element.webkitRequestFullscreen || element.msRequestFullscreen;
+        if (rfs) {
+            try { rfs.call(element).catch(() => {}); } catch (e) {}
+        }
+        if (screen.orientation && screen.orientation.lock) {
+            try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {}
         }
     }
     await waitForStableViewport();
@@ -1104,18 +1086,16 @@ function moveMonstersAwayFromPlayer(){
   }
 }
 async function resumeFromAd() {
+  ensureAudio();
   const isPhone = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   if (isPhone) {
-    try {
-      const element = document.documentElement;
-      if (element.requestFullscreen) {
-        await element.requestFullscreen();
-      }
-      if (screen.orientation && screen.orientation.lock) {
-        await screen.orientation.lock("landscape");
-      }
-    } catch (e) {
-      console.log("Could not restore fullscreen/orientation", e);
+    const element = document.documentElement;
+    const rfs = element.requestFullscreen || element.webkitRequestFullscreen || element.msRequestFullscreen;
+    if (rfs) {
+      try { rfs.call(element).catch(() => {}); } catch (e) {}
+    }
+    if (screen.orientation && screen.orientation.lock) {
+      try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {}
     }
   }
   await waitForStableViewport();
