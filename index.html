@@ -903,9 +903,7 @@ function loop(ts){
   requestAnimationFrame(loop);
 }
 function resizeGame() {
-    const canvas = document.getElementById('gameCanvas');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    positionMinimap();
 }
 window.addEventListener('resize', resizeGame);
 function startGame(){
