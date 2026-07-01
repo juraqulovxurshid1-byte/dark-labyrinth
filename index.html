@@ -1148,10 +1148,31 @@ function drawNoise(){
   nc2d.putImageData(img,0,0);
 }
 setInterval(drawNoise,80);
-window.addEventListener("resize", resizeGame);
-window.addEventListener("orientationchange", () => {
-    setTimeout(resizeGame, 300);
+// 🧠 Smart, self-correcting layout controller
+function bulletproofResize() {
+    if (typeof resizeGame === "function") resizeGame();
+    if (typeof computeVisibility === "function") computeVisibility();
+}
+window.addEventListener("resize", () => {
+    bulletproofResize();
+    setTimeout(bulletproofResize, 150);
 });
+window.addEventListener("orientationchange", () => {
+    setTimeout(bulletproofResize, 300);
+});
+window.addEventListener("load", () => {
+    setTimeout(bulletproofResize, 50);
+    setTimeout(bulletproofResize, 200);
+    setTimeout(bulletproofResize, 600); 
+});
+window.addEventListener("click", () => {
+    setTimeout(bulletproofResize, 50);
+    setTimeout(bulletproofResize, 200);
+}, { once: true });
+window.addEventListener("touchstart", () => {
+    setTimeout(bulletproofResize, 50);
+    setTimeout(bulletproofResize, 200);
+}, { once: true });
 window.addEventListener("load", () => {
     setTimeout(() => {
         resizeGame();
