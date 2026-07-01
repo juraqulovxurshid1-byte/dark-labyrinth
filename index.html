@@ -415,7 +415,7 @@ function initLevel(){
   maze[mazeH-2][mazeW-2]=0;
   placeVents();
 
-  player={x:1,y:1,px:1*CELL+CELL/2,py:1*CELL+CELL/2,moveTimer:0};
+  player={x:1,y:1,px:1*CELL+CELL/2,py:1*CELL+CELL/2,moveTimer:0,facing:1};
   placeMonsters();   // 2 at L1, 3 at L2, … (level + 1 monsters)
 
   visited=Array.from({length:mazeH},()=>Array(mazeW).fill(false));
@@ -445,7 +445,7 @@ function makeMonster(x,y){
   return {x,y,px:x*CELL+CELL/2,py:y*CELL+CELL/2,
           path:[],pathTimer:0,repath:Math.random()*0.6,   // stagger so they don't repath in lockstep
           alertLevel:0,lastKnownPX:-1,lastKnownPY:-1,
-          seen:false,scareReadyAt:0};
+          seen:false,scareReadyAt:0,facing:1};
 }
 function placeMonsters(){
   monsters=[];
@@ -526,6 +526,8 @@ function updateOneMonster(dt,m){
   m.pathTimer-=dt;
   if(m.pathTimer<=0&&m.path.length>0){
     const[nx,ny]=m.path.shift();
+    if (nx > m.x) m.facing = 1;
+    else if (nx < m.x) m.facing = -1;
     m.x=nx; m.y=ny;
     m.px=nx*CELL+CELL/2; m.py=ny*CELL+CELL/2;
     m.pathTimer=1/spd;
@@ -597,6 +599,8 @@ function analogVectorFromInput(){
   return {vx,vy,len:Math.min(len,1)};
 }
 function tryMoveSmooth(vx,vy,dt,strength=1){
+  if(vx < -0.05) player.facing = -1;
+  else if(vx > 0.05) player.facing = 1;
   const step=PLAYER_SPEED*CELL*dt*strength;
   let moved=false;
 
@@ -833,6 +837,18 @@ function updateVentButton(){
   else ventBtn.classList.remove('show');
 }
 
+function drawSprite(c, img, cx, cy, w, h, facing) {
+  if (facing === -1) {
+    c.save();
+    c.translate(cx, cy);
+    c.scale(-1, 1);
+    c.drawImage(img, -w/2, -h/2, w, h);
+    c.restore();
+  } else {
+    c.drawImage(img, cx - w/2, cy - h/2, w, h);
+  }
+}
+
 // ═══ DRAW GAME ═══
 function drawGame(){
   const vW=canvas.width,vH=canvas.height;
@@ -894,7 +910,7 @@ function drawGame(){
     const sz=CELL*1.1;
     ctx.globalCompositeOperation='screen';
     ctx.globalAlpha=alpha*0.85;
-    ctx.drawImage(monsterImg,mx-sz/2,my-sz/2,sz,sz);
+    drawSprite(ctx,monsterImg,mx,my,sz,sz,m.facing);
     ctx.restore();
   }
   // cut the scream once no monster is in sight (grace period prevents micro-flicker clipping)
@@ -926,7 +942,7 @@ function drawGame(){
   ctx.save();
   ctx.shadowBlur=22; ctx.shadowColor='#ffaa22';
   const ps=CELL*0.9;
-  ctx.drawImage(playerImg,ppx-ps/2,ppy-ps/2,ps,ps);
+  drawSprite(ctx,playerImg,ppx,ppy,ps,ps,player.facing);
   // torch flicker glow
   ctx.globalAlpha=0.35+0.12*Math.sin(Date.now()/110);
   const fg2=ctx.createRadialGradient(ppx,ppy,0,ppx,ppy,CELL*0.85);
@@ -1375,5 +1391,5 @@ if(window.visualViewport){
   window.visualViewport.addEventListener('resize', ()=>resizeGame('visualViewport'));
 }
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a147cf7fe8e3348f',t:'MTc4MjkzNDA3Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a147dab30b244d37',t:'MTc4MjkzNDUzMQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
