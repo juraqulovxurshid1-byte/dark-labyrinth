@@ -891,6 +891,15 @@ function loop(ts){
 
 // ═══ UI ═══
 function startGame(){
+  // Request fullscreen mode
+    const element = document.documentElement; // or document.getElementById('wrapper')
+    if (element.requestFullscreen) {
+        element.requestFullscreen();
+    } else if (element.webkitRequestFullscreen) { /* Safari */
+        element.webkitRequestFullscreen();
+    } else if (element.msRequestFullscreen) { /* IE11 */
+        element.msRequestFullscreen();
+    }
   ensureAudio();
   level=1; overlay.style.display='none';
   initLevel(); gameRunning=true;
