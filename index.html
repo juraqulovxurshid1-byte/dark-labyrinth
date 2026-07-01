@@ -29,7 +29,6 @@
   width: 100%;
   height: 100%;
   image-rendering: pixelated;
-  object-fit: contain;
 }
   #minimap{position:absolute;left:0;top:0;border:1px solid rgba(255,100,0,0.45);background:#000;image-rendering:pixelated;border-radius:50%;overflow:hidden;transition:left .22s ease,top .22s ease;box-shadow:0 0 14px rgba(0,0,0,0.65);}
   #hud{position:absolute;top:10px;right:10px;text-align:right;font-size:13px;color:#f84;text-shadow:0 0 8px #f84;}
@@ -903,18 +902,23 @@ function loop(ts){
   updateVentButton();
   requestAnimationFrame(loop);
 }
-
-// ═══ UI ═══
+function resizeGame() {
+    const canvas = document.getElementById('gameCanvas');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeGame);
 function startGame(){
   // Request fullscreen mode
-    const element = document.documentElement; // or document.getElementById('wrapper')
+    const element = document.documentElement; 
     if (element.requestFullscreen) {
         element.requestFullscreen();
-    } else if (element.webkitRequestFullscreen) { /* Safari */
+    } else if (element.webkitRequestFullscreen) { 
         element.webkitRequestFullscreen();
-    } else if (element.msRequestFullscreen) { /* IE11 */
+    } else if (element.msRequestFullscreen) { 
         element.msRequestFullscreen();
     }
+  resizeGame();
   ensureAudio();
   level=1; overlay.style.display='none';
   initLevel(); gameRunning=true;
@@ -922,7 +926,7 @@ function startGame(){
   requestAnimationFrame(loop);
 }
 function showGameOver(){
-  if(!isDead) return; // the player may have revived before this timer fired
+  if(!isDead) return;
   reviveInProgress=false;
   overlay.innerHTML=`
     <h1>☠ YOU DIED</h1>
@@ -936,13 +940,9 @@ function showGameOver(){
 
 function showRewardedAdForRevive(){
   try {
-    // 1. Open your Monetag Direct Link in a new tab to trigger the ad layout
     window.open('https://omg10.com/4/11221132', '_blank');
-    
-    // 2. Return a resolved promise so watchAdToRevive() immediately triggers revivePlayer()
-    return Promise.resolve();
+        return Promise.resolve();
   } catch (e) {
-    // Fallback if a aggressive popup blocker completely halts window.open
     return Promise.reject(new Error('Popup blocked! Please allow popups to revive.'));
   }
 }
@@ -986,8 +986,6 @@ function moveMonstersAwayFromPlayer(){
 }
 
 function revivePlayer(){
-  // Player stays on the exact death tile. Monsters are pushed away and briefly frozen
-  // so the revived player is not killed again instantly on the same frame.
   isDead=false; isWon=false; deathAnimTimer=0; reviveInProgress=false;
   reviveInvincibleTimer=3.0;
   reviveFreezeTimer=1.2;
