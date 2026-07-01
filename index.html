@@ -307,6 +307,30 @@ function playWin(){
   const t=audioCtx.currentTime;
   [523,659,784,1047].forEach((f,i)=>playTone(f,'sine',0.36,0.4,t+i*0.26));
 }
+function playVentExitSound(){
+  if(!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const bufferSize = audioCtx.sampleRate * 0.35;
+  const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const output = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) {
+    output[i] = Math.random() * 2 - 1;
+  }
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = noiseBuffer;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(1600, t);
+  filter.frequency.exponentialRampToValueAtTime(280, t + 0.3);
+  filter.Q.value = 3.5;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.7, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+  noise.connect(filter);
+  filter.connect(gain);
+  gain.connect(audioCtx.destination);
+  noise.start(t);
+}
 
 // ═══ MAZE GENERATION — Recursive Backtracker + loop punching ═══
 function generateMaze(w,h){
@@ -706,7 +730,7 @@ function confirmVentSelection(){
   if(ventSel===currentVentIndex){ emerge(); return; }
   travelToVent(ventSel);
 }
-function emerge(){ inVent=false; ventMenuOpen=false; currentVentIndex=-1; }
+function emerge(){ inVent=false; ventMenuOpen=false; currentVentIndex=-1; playVentExitSound(); }
 function handleVentInput(dt){
   ventInputTimer-=dt;
   if(ventInputTimer>0) return;
@@ -1249,6 +1273,7 @@ window.addEventListener('keyup',e=>{keys[e.key]=false;});
 // ═══ JOYSTICK (mobile) ═══
 const joy=document.getElementById('joystick');
 const joyKnob=document.getElementById('joyKnob');
+if (!isTouch && joy) joy.style.display = 'none';
 let joyActive=false, joyCX=0, joyCY=0;
 const JOY_DEAD=10;   // dead-zone radius (px) before movement registers
 function joyUpdate(clientX,clientY){
