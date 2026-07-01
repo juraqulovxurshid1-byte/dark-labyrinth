@@ -929,8 +929,12 @@ function resizeGame() {
     wrapper.style.height = height + "px";
     canvas.width = width;
     canvas.height = height;
+    console.log(
+    window.innerWidth,
+    window.innerHeight
+    );
 }
-window.addEventListener('resize', resizeGame);
+  
 async function startGame() {
     const isPhone =
         /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -950,6 +954,7 @@ async function startGame() {
             console.log(e);
         }
     }
+    await new Promise(resolve => setTimeout(resolve, 300));
     resizeGame();
     ensureAudio();
     level = 1;
@@ -1119,6 +1124,10 @@ function drawNoise(){
   nc2d.putImageData(img,0,0);
 }
 setInterval(drawNoise,80);
+window.addEventListener("resize", resizeGame);
+window.addEventListener("orientationchange", () => {
+    setTimeout(resizeGame, 300);
+});
 </script>
 <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
