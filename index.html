@@ -191,6 +191,7 @@ exitDoorImg.src = 'data:image/png;base64,' + EXIT_DOOR_B64;
 const scareAudio = new Audio('data:audio/mp3;base64,' + SCARE_B64);
 scareAudio.volume = 0.9;
 let scareAudioBuffer = null;
+let ventDiscNoiseBuf = null;   // cached noise buffer for vent discovery chime
 let scareAudioSource = null;
 let scareAudioPlayingUntil = 0;
 let outOfSightTimer = 0;
@@ -582,50 +583,62 @@ function initDrone(){
 
 // Smoothly update drone parameters based on game state.
 // Called every frame from updateHorrorEffects.
+// Uses dirty-checking: setTargetAtTime only fires when a value actually changed,
+// avoiding unnecessary Web Audio scheduling on mobile.
 function updateDrone(dt){
   if(!drone || !audioCtx) return;
   const t = audioCtx.currentTime;
-  const ramp = 0.3;  // setTargetAtTime time-constant — smooth but responsive
 
   if(isDead){
-    // Fade everything to silence on death
-    drone.master.gain.setTargetAtTime(0, t, 0.8);
+    if(drone._dead !== true){
+      drone.master.gain.setTargetAtTime(0, t, 0.8);
+      drone._dead = true;
+    }
     return;
+  }
+  if(drone._dead){ drone._dead = false; }
+
+  const p = monsterProximity;  // 0 = safe, ~1 = very close
+  const ramp = 0.3;
+
+  // Helper: only set param if rounded value changed (reduces Web Audio calls ~90%)
+  function paramIf(obj, key, param, val, tc){
+    const r = Math.round(val * 1000) / 1000;   // quantize to 3 decimal places
+    const cacheKey = '_' + key;
+    if(obj[cacheKey] !== r){
+      obj[cacheKey] = r;
+      param.setTargetAtTime(val, t, tc || ramp);
+    }
   }
 
   // Master always at 1.0 when alive (ventFilter handles the muffling)
-  drone.master.gain.setTargetAtTime(1.0, t, 0.5);
+  paramIf(drone, 'master', drone.master.gain, 1.0, 0.5);
 
-  const p = monsterProximity;  // 0 = safe, ~1 = very close
+  // ── Base hum ──
+  paramIf(drone, 'b1g', drone.base1G.gain, 0.12 + 0.06 * p);
+  paramIf(drone, 'b2g', drone.base2G.gain, 0.09 + 0.05 * p);
+  paramIf(drone, 'b2f', drone.base2.frequency, 33.5 + 3.0 * p);
 
-  // ── Base hum: slightly louder & faster beating when threatened ──
-  drone.base1G.gain.setTargetAtTime(0.12 + 0.06 * p, t, ramp);
-  drone.base2G.gain.setTargetAtTime(0.09 + 0.05 * p, t, ramp);
-  // Beating speeds up: closer detuning = faster beating
-  drone.base2.frequency.setTargetAtTime(33.5 + 3.0 * p, t, ramp);
+  // ── Tension layer ──
+  const tensVol = Math.max(0, p - 0.1) * 0.08;
+  paramIf(drone, 't1g', drone.tens1G.gain, tensVol);
+  paramIf(drone, 't2g', drone.tens2G.gain, tensVol * 0.8);
+  paramIf(drone, 't1f', drone.tens1.frequency, 55 + 25 * p);
+  paramIf(drone, 't2f', drone.tens2.frequency, 57.3 + 25 * p);
+  paramIf(drone, 'tfF', drone.tensFilter.frequency, 180 + 500 * p);
 
-  // ── Tension layer: fades in with proximity ──
-  const tensVol = Math.max(0, p - 0.1) * 0.08;  // 0 when safe, ~0.07 when close
-  drone.tens1G.gain.setTargetAtTime(tensVol, t, ramp);
-  drone.tens2G.gain.setTargetAtTime(tensVol * 0.8, t, ramp);
-  // Tension pitch rises slightly with proximity
-  drone.tens1.frequency.setTargetAtTime(55 + 25 * p, t, ramp);
-  drone.tens2.frequency.setTargetAtTime(57.3 + 25 * p, t, ramp);
-  // Filter opens to let more harmonics through when threatened
-  drone.tensFilter.frequency.setTargetAtTime(180 + 500 * p, t, ramp);
-
-  // ── Noise: widens and gets louder when threatened ──
-  drone.noiseG.gain.setTargetAtTime(0.025 + 0.06 * p, t, ramp);
-  drone.noiseFilter.frequency.setTargetAtTime(120 + 300 * p, t, ramp);
-  drone.noiseFilter.Q.setTargetAtTime(0.8 + 1.5 * p, t, ramp);
+  // ── Noise ──
+  paramIf(drone, 'nG', drone.noiseG.gain, 0.025 + 0.06 * p);
+  paramIf(drone, 'nF', drone.noiseFilter.frequency, 120 + 300 * p);
+  paramIf(drone, 'nQ', drone.noiseFilter.Q, 0.8 + 1.5 * p);
 
   // ── Vent muffling ──
   if(inVent){
-    drone.ventFilter.frequency.setTargetAtTime(250, t, 0.15);   // very muffled
-    drone.ventFilter.Q.setTargetAtTime(2.0, t, 0.15);
+    paramIf(drone, 'vfF', drone.ventFilter.frequency, 250, 0.15);
+    paramIf(drone, 'vfQ', drone.ventFilter.Q, 2.0, 0.15);
   } else {
-    drone.ventFilter.frequency.setTargetAtTime(20000, t, 0.4);  // open
-    drone.ventFilter.Q.setTargetAtTime(0.7, t, 0.4);
+    paramIf(drone, 'vfF', drone.ventFilter.frequency, 20000, 0.4);
+    paramIf(drone, 'vfQ', drone.ventFilter.Q, 0.7, 0.4);
   }
 }
 
@@ -679,12 +692,13 @@ function updateDustParticles(dt){
     dustSpawnAccum = 0;
   }
 
-  // Update existing particles
+  // Update existing particles (swap-and-pop removal — O(1) per death)
   for(let i = dustParticles.length - 1; i >= 0; i--){
     const p = dustParticles[i];
     p.life += dt;
     if(p.life >= p.maxLife){
-      dustParticles.splice(i, 1);
+      dustParticles[i] = dustParticles[dustParticles.length - 1];
+      dustParticles.pop();
       continue;
     }
     p.x += p.vx * dt;
@@ -755,13 +769,17 @@ function playVentDiscoverySound(){
   if(!audioCtx) return;
   const t = audioCtx.currentTime;
 
-  // Layer 1: Air-through-grate noise — bandpass filter sweep
-  const bufLen = Math.floor(audioCtx.sampleRate * 0.45);
-  const buf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
-  const data = buf.getChannelData(0);
+  // Layer 1: Air-through-grate noise — bandpass filter sweep (cached buffer, reshuffled)
+  const bufDur = 0.45;
+  const bufLen = Math.floor(audioCtx.sampleRate * bufDur);
+  if(!ventDiscNoiseBuf || ventDiscNoiseBuf.length !== bufLen){
+    ventDiscNoiseBuf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
+  }
+  // Reshuffle noise so each discovery sounds slightly different
+  const data = ventDiscNoiseBuf.getChannelData(0);
   for(let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
   const src = audioCtx.createBufferSource();
-  src.buffer = buf;
+  src.buffer = ventDiscNoiseBuf;
 
   const bp = audioCtx.createBiquadFilter();
   bp.type = 'bandpass';
@@ -903,6 +921,7 @@ function initLevel(){
   dustParticles = [];
   dustSpawnAccum = 0;
   ventDiscoveryPulse = [];
+  mmDirty = true;
   playerStepTimer=0;
 
   banner.textContent='LEVEL '+level;
@@ -1046,6 +1065,7 @@ function syncPlayerCell(){
   if(isWalkableCell(cx,cy)){
     player.x=cx; player.y=cy;
     visited[cy][cx]=true;
+    mmDirty = true;
   }
 }
 function analogVectorFromInput(){
@@ -1199,6 +1219,7 @@ function travelToVent(destIdx){
   player.x=v.x; player.y=v.y;
   player.px=v.x*CELL+CELL/2; player.py=v.y*CELL+CELL/2;
   visited[v.y][v.x]=true;
+  mmDirty = true;
   emerge();
 }
 function confirmVentSelection(){
@@ -1296,7 +1317,7 @@ function drawVentPrompt(){
   ctx.globalAlpha=0.65+0.35*pulse;
   ctx.fillStyle='#8fe6da';
   ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.shadowBlur=8; ctx.shadowColor='rgba(70,165,175,0.9)';
+  ctx.shadowBlur=0; // disabled for mobile perf; text already pulses
   ctx.fillText(label,canvas.width/2,by+bh/2);
   ctx.restore();
 }
@@ -1337,26 +1358,31 @@ function drawGame(){
   // Pre-rendered textured walls + floor
   ctx.drawImage(wallLayer,0,0);
 
-  // Exit door with green glow
+  // Exit door with green glow — skip if off-screen (player can't see it)
   const ex=mazeW-2,ey=mazeH-2;
   const exitX=ex*CELL+CELL/2, exitY=ey*CELL+CELL/2;
-  const eg=ctx.createRadialGradient(exitX,exitY,1,exitX,exitY,CELL*2.55);
-  eg.addColorStop(0,'rgba(0,255,70,0.58)');
-  eg.addColorStop(0.45,'rgba(0,255,70,0.25)');
-  eg.addColorStop(1,'rgba(0,255,70,0)');
-  ctx.fillStyle=eg;
-  ctx.fillRect((ex-2)*CELL,(ey-2)*CELL,CELL*5,CELL*5);
-  ctx.save();
-  ctx.shadowBlur=22;
-  ctx.shadowColor='rgba(0,255,70,0.95)';
-  const ds=CELL*1.22;
-  ctx.drawImage(exitDoorImg,exitX-ds/2,exitY-ds/2,ds,ds);
-  ctx.restore();
+  const exitDist=Math.hypot(exitX-player.px, exitY-player.py);
+  const exitVisible=exitDist < (LIGHT_RADIUS+3)*CELL;
+  if(exitVisible){
+    const eg=ctx.createRadialGradient(exitX,exitY,1,exitX,exitY,CELL*2.55);
+    eg.addColorStop(0,'rgba(0,255,70,0.58)');
+    eg.addColorStop(0.45,'rgba(0,255,70,0.25)');
+    eg.addColorStop(1,'rgba(0,255,70,0)');
+    ctx.fillStyle=eg;
+    ctx.fillRect((ex-2)*CELL,(ey-2)*CELL,CELL*5,CELL*5);
+    const ds=CELL*1.22;
+    ctx.drawImage(exitDoorImg,exitX-ds/2,exitY-ds/2,ds,ds);
+  }
 
-  // Vents
+  // Vents — skip if far from player (no gradient creation needed)
+  const _ppx=player.px, _ppy=player.py;
   for(let i = 0; i < vents.length; i++){
     const v = vents[i];
+    const vpx = v.x*CELL+CELL/2, vpy = v.y*CELL+CELL/2;
+    const vdist = Math.hypot(vpx - _ppx, vpy - _ppy);
+    // Draw if within torch range + margin, or if discovery pulse is active
     const pulse = (ventDiscoveryPulse[i] > 0) ? ventDiscoveryPulse[i] : 0;
+    if(vdist > (LIGHT_RADIUS + 2) * CELL && pulse <= 0) continue;
     drawVent(ctx, v.x*CELL, v.y*CELL, pulse);
   }
 
@@ -1433,7 +1459,7 @@ function drawGame(){
   // Player sprite (hidden while inside a vent)
   if(!inVent){
   ctx.save();
-  ctx.shadowBlur=22; ctx.shadowColor='#ffaa22';
+  // No shadowBlur — too expensive on mobile; torch glow gradient replaces it
   const ps=CELL*0.9;
   drawSprite(ctx,playerImg,ppx,ppy,ps,ps,player.facing);
   // torch glow — erratic when moving, steady when still
@@ -1457,8 +1483,7 @@ function drawGame(){
     ctx.globalAlpha=0.38+0.22*pulse;
     ctx.strokeStyle='#00ff66';
     ctx.lineWidth=3;
-    ctx.shadowBlur=18;
-    ctx.shadowColor='#00ff66';
+    // shadowBlur removed — mobile perf; thick stroke is visible enough
     ctx.beginPath();
     ctx.arc(ppx,ppy,CELL*(0.74+0.10*pulse),0,Math.PI*2);
     ctx.stroke();
@@ -1472,7 +1497,7 @@ function drawGame(){
     ctx.save();
     ctx.font=`bold ${Math.round(CELL*1.3)}px Courier New`;
     ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillStyle='#fff'; ctx.shadowBlur=14; ctx.shadowColor='#f00';
+    ctx.fillStyle='#fff'; // shadowBlur removed — mobile perf; red overlay already conveys death
     ctx.fillText('☠',ppx,ppy);
     ctx.restore();
   }
@@ -1485,7 +1510,14 @@ function drawGame(){
 }
 
 // ═══ MINIMAP — circular, only visited path shown ═══
+let mmDirty = true;       // redraw flag — only redraw when something changed
+let mmLastPx = -1, mmLastPy = -1;   // track player cell for dirty detection
+
 function drawMinimap(){
+  // Skip redraw if nothing changed (player hasn't moved, no new discoveries)
+  const curPx = player.x, curPy = player.y;
+  if(!mmDirty && curPx === mmLastPx && curPy === mmLastPy && !inVent) return;
+  mmDirty = false; mmLastPx = curPx; mmLastPy = curPy;
   const R=MM_RES/2;
   mmCtx.fillStyle='#000';
   mmCtx.fillRect(0,0,MM_RES,MM_RES);
@@ -1526,9 +1558,14 @@ function drawMinimap(){
 // but NEVER the bottom-left (that corner is reserved for the joystick) ═══
 let mmCorner='tr';   // sticky so the map doesn't jitter between corners
 function positionMinimap(){
-  const r=wrap.getBoundingClientRect();
-  const ws=r.width;
-  const hs=r.height;
+  // Cache wrapper dimensions to avoid getBoundingClientRect every frame (layout thrash).
+  // Only re-measure when resized or on first call.
+  if(!positionMinimap._cache){
+    const r=wrap.getBoundingClientRect();
+    positionMinimap._cache={w:r.width, h:r.height};
+  }
+  const ws=positionMinimap._cache.w;
+  const hs=positionMinimap._cache.h;
   if(!ws) return;
   const mmSize=Math.max(92,Math.min(MM_DISPLAY,ws*0.26));
   mmCvs.style.width=mmSize+'px';
@@ -1641,6 +1678,7 @@ function updateHorrorEffects(dt){
       if(dist < LIGHT_RADIUS + 0.5 && lineOfSight(player.x, player.y, v.x, v.y)){
         v.discovered = true;
         ventDiscoveryPulse[i] = 1.2;   // visual pulse duration
+        mmDirty = true;
         playVentDiscoverySound();
       }
     }
@@ -1701,6 +1739,7 @@ function loop(ts){
   requestAnimationFrame(loop);
 }
 function resizeGame(source) {
+    positionMinimap._cache = null;   // invalidate cached layout rect
     const wrapper = document.getElementById("wrapper");
     const canvas = document.getElementById("gameCanvas");
     const vp = getViewportSize();
@@ -1966,5 +2005,5 @@ if(window.visualViewport){
   window.visualViewport.addEventListener('resize', ()=>resizeGame('visualViewport'));
 }
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14bc1df8fcf3632',t:'MTc4Mjk3NTQ1Nw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14be028e8a9d36a',t:'MTc4Mjk3NjY5Nw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
