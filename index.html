@@ -54,6 +54,29 @@
   #ventBtn{position:absolute;left:50%;bottom:96px;transform:translateX(-50%);background:rgba(14,16,22,0.92);border:1.5px solid rgba(120,200,190,0.6);color:#8fe6da;font-family:'Courier New',monospace;font-weight:bold;letter-spacing:1px;font-size:15px;padding:12px 30px;border-radius:30px;cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:none;display:none;box-shadow:0 0 16px rgba(70,165,175,0.45);z-index:6;transition:transform .1s ease;}
   #ventBtn.show{display:block;}
   #ventBtn:active{transform:translateX(-50%) scale(0.93);}
+
+  /* ── Auth modal ── */
+  .auth-modal{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.96);display:none;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;}
+  .auth-card{background:#0a0a0e;border:1px solid rgba(255,68,0,0.5);padding:30px 26px 24px;max-width:380px;width:100%;box-shadow:0 0 28px rgba(255,68,0,0.22);}
+  .auth-title{color:#f84;font-size:clamp(18px,4.5vw,24px);letter-spacing:5px;margin-bottom:8px;text-shadow:0 0 18px #f84,0 0 40px rgba(255,68,0,0.4);}
+  .auth-sub{color:#888;font-size:clamp(10px,2.4vw,12px);margin-bottom:22px;line-height:1.55;}
+  .auth-tabs{display:flex;margin-bottom:18px;border-bottom:1px solid rgba(255,68,0,0.3);}
+  .auth-tab{flex:1;background:transparent;border:none;color:#666;padding:10px;cursor:pointer;letter-spacing:3px;font-family:'Courier New',monospace;font-size:13px;transition:color .2s;}
+  .auth-tab.active{color:#f84;border-bottom:2px solid #f84;margin-bottom:-1px;}
+  .auth-form{display:flex;flex-direction:column;gap:10px;margin-bottom:10px;}
+  .auth-form input{background:#000;border:1px solid rgba(255,68,0,0.3);color:#f84;padding:11px 12px;font-family:'Courier New',monospace;font-size:16px;text-align:center;letter-spacing:2px;outline:none;transition:border-color .2s;}
+  .auth-form input:focus{border-color:#f84;}
+  .auth-form input::placeholder{color:#555;letter-spacing:1px;}
+  .auth-error{color:#f55;font-size:12px;min-height:16px;margin-top:4px;}
+  .auth-skip{background:transparent;border:1px solid rgba(255,255,255,0.2);color:#888;padding:9px 20px;cursor:pointer;font-family:'Courier New',monospace;letter-spacing:2px;font-size:11px;margin-top:14px;transition:all .2s;}
+  .auth-skip:hover{border-color:rgba(255,255,255,0.5);color:#ccc;}
+  .auth-terms{color:#555;font-size:10px;margin-top:18px;line-height:1.5;}
+  .auth-terms a{color:#aaa;text-decoration:underline;}
+  .overlay-user{color:#8fe6da;font-size:13px;letter-spacing:2px;margin-top:-4px;margin-bottom:6px;font-family:'Courier New',monospace;}
+  .overlay-guest{color:#777;font-size:11px;letter-spacing:2px;margin-top:-4px;margin-bottom:6px;font-family:'Courier New',monospace;}
+  #playerHud{font-size:10px;color:#777;margin-top:5px;letter-spacing:1px;display:none;font-family:'Courier New',monospace;}
+  #playerHud a{cursor:pointer;color:#a85;text-decoration:underline;}
+  #playerHud a:hover{color:#f84;}
 </style>
 </head>
 <body>
@@ -63,6 +86,7 @@
   <div id="hud">
     <div id="lvlDisplay">LEVEL 1</div>
     <div id="stepsDisplay" style="font-size:11px;color:#855;margin-top:3px;">░░░░░░░░░░</div>
+    <div id="playerHud"><span id="playerName"></span><a id="playerLogout">logout</a></div>
   </div>
   <div id="heartbeat"></div>
   <div id="noise"><canvas id="noiseCanvas"></canvas></div>
@@ -70,7 +94,25 @@
   <div id="joystick"><div id="joyKnob"></div></div>
   <button id="ventBtn">ENTER VENT</button>
 </div>
-<div id="overlay">
+<div id="authModal" class="auth-modal">
+  <div class="auth-card">
+    <h1 class="auth-title">☠ DARK LAYBRINTH</h1>
+    <p class="auth-sub">Sign in to save progress and compete on the leaderboard.<br/>Or play as guest — progress won't be saved.</p>
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-mode="login">LOGIN</button>
+      <button class="auth-tab" data-mode="register">REGISTER</button>
+    </div>
+    <div class="auth-form">
+      <input type="text" id="authUsername" placeholder="Username (3–20 chars)" maxlength="20" autocomplete="username" spellcheck="false">
+      <input type="password" id="authPin" placeholder="4-digit PIN" maxlength="4" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password">
+      <button id="authSubmit" class="btn">LOGIN</button>
+      <div id="authError" class="auth-error"></div>
+    </div>
+    <button id="authSkip" class="auth-skip">PLAY AS GUEST</button>
+    <p class="auth-terms">Players must be 13 or older. By signing in you accept our <a href="/terms.html">Terms</a> and <a href="/privacy.html">Privacy Policy</a>.</p>
+  </div>
+</div>
+<div id="overlay" style="display:none">
   <h1>☠ DARK LABYRINTH</h1>
   <p>Your torch reveals only what's near.<br/>The monsters <em>hear</em> your footsteps.<br/><strong style="color:#f84">Stand still — go silent.</strong><br/>Reach the <span style="color:#0f0">green exit</span> to escape.</p>
   <p class="sub">Your map only shows where you have walked.</p>
@@ -363,6 +405,23 @@ function playGameOverVoice() {
     gameoverAudio.play().catch(()=>{});
   }
 }
+
+// ═══ MONETAG DIRECT LINK ═══
+// Opens the publisher's monetag Direct URL Link in a new tab. monetag tracks
+// the click and serves whatever ad unit is configured for that link.
+// NOTE: this is the "dark pattern" version — there is no real completion
+// callback, so the game can't know whether the user actually watched an ad.
+// Replaced when the publisher wires up monetag's proper rewarded-ad SDK or
+// Google Ad Placement (which fire a real onComplete callback).
+function showRewardedAdForRevive(){
+  try {
+    window.open('https://omg10.com/4/11221132', '_blank');
+        return Promise.resolve();
+  } catch (e) {
+    return Promise.reject(new Error('Popup blocked! Please allow popups to revive.'));
+  }
+}
+
 function playTone(freq,type,vol,dur,t){
   if(!audioCtx||vol<0.002) return;
   const o=audioCtx.createOscillator(), g=audioCtx.createGain();
@@ -1737,7 +1796,13 @@ function checkEvents(){
   }
   if(player.x===mazeW-2&&player.y===mazeH-2){
     isWon=true; playWin();
-    setTimeout(()=>{level++;initLevel();setTimeout(() => playLevelUpVoice(), 500);resizeGame('level-win');},2100);
+    setTimeout(()=>{
+      level++;
+      syncLevel(level);
+      initLevel();
+      setTimeout(() => playLevelUpVoice(), 500);
+      resizeGame('level-win');
+    },2100);
   }
 }
 
@@ -1819,15 +1884,6 @@ function showGameOver(){
   overlay.style.display='flex';
 }
 
-function showRewardedAdForRevive(){
-  try {
-    window.open('https://omg10.com/4/11221132', '_blank');
-        return Promise.resolve();
-  } catch (e) {
-    return Promise.reject(new Error('Popup blocked! Please allow popups to revive.'));
-  }
-}
-
 function watchAdToRevive(){
   if(!isDead||reviveInProgress) return;
   ensureAudio();
@@ -1847,6 +1903,25 @@ function watchAdToRevive(){
     if(btn){ btn.disabled=false; btn.textContent='WATCH AD TO REVIVE'; }
     if(status) status.textContent=(err&&err.message)?err.message:'Ad was not completed. Revive unavailable.';
   });
+}
+
+async function resumeFromAd() {
+  ensureAudio();
+  playReviveVoice();
+  const isPhone = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (isPhone) {
+    const element = document.documentElement;
+    const rfs = element.requestFullscreen || element.webkitRequestFullscreen || element.msRequestFullscreen;
+    if (rfs) {
+      try { rfs.call(element).catch(() => {}); } catch (e) {}
+    }
+    if (screen.orientation && screen.orientation.lock) {
+      try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {}
+    }
+  }
+  await waitForStableViewport();
+  revivePlayer();
+  resizeGame('resume-from-ad');
 }
 
 function moveMonstersAwayFromPlayer(){
@@ -1869,24 +1944,7 @@ function moveMonstersAwayFromPlayer(){
     m.seen=false; m.scareReadyAt=performance.now()/1000+SCARE_COOLDOWN;
   }
 }
-async function resumeFromAd() {
-  ensureAudio();
-  playReviveVoice();
-  const isPhone = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  if (isPhone) {
-    const element = document.documentElement;
-    const rfs = element.requestFullscreen || element.webkitRequestFullscreen || element.msRequestFullscreen;
-    if (rfs) {
-      try { rfs.call(element).catch(() => {}); } catch (e) {}
-    }
-    if (screen.orientation && screen.orientation.lock) {
-      try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {}
-    }
-  }
-  await waitForStableViewport();
-  revivePlayer();
-  resizeGame('resume-from-ad');
-}
+
 function revivePlayer(){
   isDead=false; isWon=false; deathAnimTimer=0; reviveInProgress=false;
   reviveInvincibleTimer=3.0;
@@ -2025,6 +2083,264 @@ window.addEventListener("orientationchange", () => {
 if(window.visualViewport){
   window.visualViewport.addEventListener('resize', ()=>resizeGame('visualViewport'));
 }
+
+// ═══ AUTH STATE & API ═══
+// API base derived from current origin so the same code works on any
+// deployment (Vercel preview URL, custom domain, localhost).
+const API_BASE = (typeof window !== 'undefined' && window.location && window.location.origin || '') + '/api';
+
+// In-memory + persisted auth state. The token is the only thing kept in
+// localStorage; the player object is reloaded from the server on session
+// restore.
+const auth = {
+  token: null,
+  player: null,   // { username, current_level, gadgets_light, gadgets_freeze }
+  isGuest: false,
+};
+try { auth.token = localStorage.getItem('darklaybrinth_token') || null; } catch (e) {}
+
+// Generic API helper. Sends the bearer token if we have one. Throws on
+// non-2xx with the server's error message so the UI can show it verbatim.
+async function apiCall(path, opts) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (auth.token) headers['Authorization'] = 'Bearer ' + auth.token;
+  const res = await fetch(API_BASE + path, {
+    ...opts,
+    headers: { ...headers, ...(opts && opts.headers || {}) },
+  });
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+  return data;
+}
+
+// Try to restore a previous session by validating the stored token against
+// the server. Returns true if valid, false (and clears the bad token) if not.
+async function restoreSession() {
+  if (!auth.token) return false;
+  try {
+    // /sync with empty body validates the token and returns the player row
+    // (the server rejects the empty update, but that still means the token
+    // worked — we catch the specific error and read state from /leaderboard).
+    await apiCall('/leaderboard', { method: 'GET' });
+    return true;
+  } catch (e) {
+    auth.token = null;
+    try { localStorage.removeItem('darklaybrinth_token'); } catch (_) {}
+    return false;
+  }
+}
+
+async function fetchPlayer() {
+  if (!auth.token) return;
+  try {
+    // Use sync with a harmless no-op-ish field just to read the row.
+    // Server only updates fields you provide, so passing the same value
+    // we just read is a true no-op.
+    const result = await apiCall('/sync', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    auth.player = result.player;
+  } catch (e) {
+    // Sync requires at least one field. Fall back to a leaderboard lookup
+    // — if we're logged in, we'll appear there with our username.
+    try {
+      const lb = await apiCall('/leaderboard', { method: 'GET' });
+      const me = lb.you;
+      if (me) {
+        auth.player = {
+          username: me.username,
+          current_level: me.current_level,
+          gadgets_light: 0,
+          gadgets_freeze: 0,
+        };
+      }
+    } catch (_) {}
+  }
+}
+
+async function registerUser(username, pin) {
+  const result = await apiCall('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ username, pin }),
+  });
+  auth.token = result.token;
+  auth.player = result.player;
+  auth.isGuest = false;
+  try { localStorage.setItem('darklaybrinth_token', result.token); } catch (_) {}
+}
+
+async function loginUser(username, pin) {
+  const result = await apiCall('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, pin }),
+  });
+  auth.token = result.token;
+  auth.player = result.player;
+  auth.isGuest = false;
+  try { localStorage.setItem('darklaybrinth_token', result.token); } catch (_) {}
+}
+
+function logout() {
+  auth.token = null;
+  auth.player = null;
+  auth.isGuest = false;
+  try { localStorage.removeItem('darklaybrinth_token'); } catch (_) {}
+  showAuthModal();
+}
+
+// Silent server sync for gameplay events. Never throws — a failed sync
+// should not disrupt gameplay.
+async function syncLevel(newLevel) {
+  if (!auth.token) return;
+  try {
+    await apiCall('/sync', {
+      method: 'POST',
+      body: JSON.stringify({ current_level: newLevel }),
+    });
+  } catch (e) {}
+}
+
+// ═══ AUTH MODAL UI ═══
+let authMode = 'login';
+
+function showAuthModal() {
+  document.getElementById('authModal').style.display = 'flex';
+  document.getElementById('overlay').style.display = 'none';
+  document.getElementById('authError').textContent = '';
+  document.getElementById('authUsername').value = '';
+  document.getElementById('authPin').value = '';
+  setAuthMode('login');
+  setTimeout(() => document.getElementById('authUsername').focus(), 100);
+}
+function hideAuthModal() { document.getElementById('authModal').style.display = 'none'; }
+
+function setAuthMode(mode) {
+  authMode = mode;
+  document.querySelectorAll('.auth-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.mode === mode);
+  });
+  document.getElementById('authSubmit').textContent = mode === 'register' ? 'REGISTER' : 'LOGIN';
+  document.getElementById('authError').textContent = '';
+}
+
+async function handleAuthSubmit() {
+  const username = document.getElementById('authUsername').value.trim();
+  const pin = document.getElementById('authPin').value.trim();
+  const errorEl = document.getElementById('authError');
+  const submitBtn = document.getElementById('authSubmit');
+
+  errorEl.textContent = '';
+  if (!username) { errorEl.textContent = 'Please enter a username.'; return; }
+  if (!pin || !/^\d{4}$/.test(pin)) { errorEl.textContent = 'PIN must be exactly 4 digits.'; return; }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = authMode === 'register' ? 'CREATING…' : 'SIGNING IN…';
+
+  try {
+    if (authMode === 'register') await registerUser(username, pin);
+    else await loginUser(username, pin);
+    await fetchPlayer();
+    updateHudForAuth();
+    hideAuthModal();
+    showOverlay();
+  } catch (e) {
+    errorEl.textContent = e.message;
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = authMode === 'register' ? 'REGISTER' : 'LOGIN';
+  }
+}
+
+function handleGuestSkip() {
+  auth.isGuest = true;
+  auth.token = null;
+  auth.player = null;
+  hideAuthModal();
+  showOverlay();
+}
+
+function updateHudForAuth() {
+  const hud = document.getElementById('playerHud');
+  const nameEl = document.getElementById('playerName');
+  if (auth.player && auth.player.username) {
+    nameEl.textContent = auth.player.username + ' · ';
+    hud.style.display = 'block';
+  } else {
+    hud.style.display = 'none';
+  }
+}
+
+function showOverlay() {
+  const overlay = document.getElementById('overlay');
+  overlay.style.display = 'flex';
+
+  // Insert/refresh the user or guest line just below the title.
+  const h1 = overlay.querySelector('h1');
+  let userLine = document.getElementById('overlayUserLine');
+  if (auth.player && auth.player.username) {
+    if (!userLine) {
+      userLine = document.createElement('p');
+      userLine.id = 'overlayUserLine';
+      h1.parentNode.insertBefore(userLine, h1.nextSibling);
+    }
+    userLine.className = 'overlay-user';
+    userLine.textContent = '— ' + auth.player.username + ' —';
+  } else if (auth.isGuest) {
+    if (!userLine) {
+      userLine = document.createElement('p');
+      userLine.id = 'overlayUserLine';
+      h1.parentNode.insertBefore(userLine, h1.nextSibling);
+    }
+    userLine.className = 'overlay-guest';
+    userLine.textContent = '— PLAYING AS GUEST —';
+  } else if (userLine) {
+    userLine.remove();
+  }
+}
+
+function bindAuthEvents() {
+  document.querySelectorAll('.auth-tab').forEach(tab => {
+    tab.addEventListener('click', () => setAuthMode(tab.dataset.mode));
+  });
+  document.getElementById('authSubmit').addEventListener('click', handleAuthSubmit);
+  document.getElementById('authSkip').addEventListener('click', handleGuestSkip);
+  document.getElementById('authPin').addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleAuthSubmit();
+  });
+  document.getElementById('authUsername').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('authPin').focus();
+  });
+  document.getElementById('playerLogout').addEventListener('click', e => {
+    e.preventDefault();
+    logout();
+  });
+}
+
+// ═══ BOOTSTRAP ═══
+// Decide whether to show the auth modal or jump straight to the game
+// overlay, based on whether we have a valid stored token.
+async function bootstrapGame() {
+  bindAuthEvents();
+  if (auth.token) {
+    const restored = await restoreSession();
+    if (restored) {
+      await fetchPlayer();
+      updateHudForAuth();
+      showOverlay();
+      return;
+    }
+  }
+  showAuthModal();
+}
+
+// Run after DOM is ready.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrapGame);
+} else {
+  bootstrapGame();
+}
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c0a579bd535f6',t:'MTc4Mjk3ODQyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c0a579bd535f6',t:'MTc4Mjk3ODQyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14d2f149c438f2f',t:'MTc4Mjk5MDQxNg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
