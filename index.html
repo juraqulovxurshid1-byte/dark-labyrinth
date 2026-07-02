@@ -45,7 +45,12 @@
   #joystick{position:absolute;bottom:26px;left:24px;width:118px;height:118px;border-radius:50%;background:rgba(255,255,255,0.05);border:2px solid rgba(255,100,0,0.4);touch-action:none;user-select:none;-webkit-user-select:none;opacity:0.82;}
   #joyKnob{position:absolute;left:50%;top:50%;width:52px;height:52px;border-radius:50%;background:rgba(255,100,0,0.45);border:2px solid rgba(255,150,50,0.85);transform:translate(-50%,-50%);pointer-events:none;box-shadow:0 0 14px rgba(255,100,0,0.5);transition:none;}
   #noise{position:absolute;inset:0;pointer-events:none;opacity:0.035;}
-  #levelBanner{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:clamp(20px,5vw,36px);color:#f84;text-shadow:0 0 20px #f84;letter-spacing:6px;pointer-events:none;opacity:0;transition:opacity 0.5s;}
+  #levelBanner{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;opacity:0;transition:opacity 0.35s;text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px;}
+  #levelBanner .lvl-line{font-size:clamp(22px,6vw,42px);color:#f84;letter-spacing:6px;font-weight:bold;text-shadow:0 0 20px #f84,0 0 60px rgba(255,68,0,0.4);}
+  #levelBanner .intel-line{font-size:clamp(10px,2.5vw,14px);color:rgba(255,136,68,0.65);letter-spacing:2px;font-weight:normal;text-shadow:0 0 8px rgba(255,68,0,0.3);min-height:1.4em;}
+  #levelBanner .intel-sep{color:rgba(255,136,68,0.25);margin:0 6px;}
+  #levelBanner.flicker-in{animation:bannerFlicker 0.35s steps(2) 2;}
+  @keyframes bannerFlicker{0%{opacity:0}50%{opacity:0.9}100%{opacity:0.3}}
   #ventBtn{position:absolute;left:50%;bottom:96px;transform:translateX(-50%);background:rgba(14,16,22,0.92);border:1.5px solid rgba(120,200,190,0.6);color:#8fe6da;font-family:'Courier New',monospace;font-weight:bold;letter-spacing:1px;font-size:15px;padding:12px 30px;border-radius:30px;cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:none;display:none;box-shadow:0 0 16px rgba(70,165,175,0.45);z-index:6;transition:transform .1s ease;}
   #ventBtn.show{display:block;}
   #ventBtn:active{transform:translateX(-50%) scale(0.93);}
@@ -61,7 +66,7 @@
   </div>
   <div id="heartbeat"></div>
   <div id="noise"><canvas id="noiseCanvas"></canvas></div>
-  <div id="levelBanner">LEVEL 1</div>
+  <div id="levelBanner"><span class="lvl-line">LEVEL 1</span><span class="intel-line"></span></div>
   <div id="joystick"><div id="joyKnob"></div></div>
   <button id="ventBtn">ENTER VENT</button>
 </div>
@@ -358,6 +363,101 @@ function playGameOverVoice() {
     gameoverAudio.play().catch(()=>{});
   }
 }
+
+// ═══ REAL MONETAG REWARDED AD ═══
+// Replaces the previous "open a tab, claim success" pattern with monetag's
+// real rewarded-ad SDK. The SDK only fires its completion callback after the
+// user actually watches the ad — we gate revive on that, with safe fallbacks
+// if the SDK isn't loaded, the API isn't exposed, or the user skips.
+// Never fabricate success.
+//
+// NOTE: monetag's exact rewarded-ad method signature varies by product
+// version. The candidates below cover the most common ones. If monetag's
+// API for your account uses a different shape, adjust findMonetagRewardFn()
+// and the callback object passed to it.
+
+const MONETAG_ID                = '8f063ae3b78d60e5f890d6f073f86581';
+const MONETAG_SDK_URL           = 'https://cdn.monetag.com/js/sdk.js';
+const MONETAG_LOAD_TIMEOUT_MS   = 3000;
+
+// Probe the most common monetag rewarded-ad entry points across versions.
+function findMonetagRewardFn(){
+  const candidates = [
+    [window.MonetagSDK, 'showRewardAd'],
+    [window.MonetagSDK, 'showRewardedAd'],
+    [window.monetag,    'showRewardAd'],
+    [window.monetag,    'showRewardedAd'],
+    [window.Monetag,    'showRewardAd'],
+  ];
+  for(const [ns, name] of candidates){
+    if(ns && typeof ns[name] === 'function') return ns[name].bind(ns);
+  }
+  return null;
+}
+
+// Idempotent SDK loader. Safe to call multiple times. Returns true if the
+// SDK loaded successfully, false if it failed or timed out.
+function ensureMonetagSDK(){
+  if(typeof window.MonetagSDK !== 'undefined' || typeof window.monetag !== 'undefined'){
+    return Promise.resolve(true);
+  }
+  if(window.__monetagSdkLoadPromise) return window.__monetagSdkLoadPromise;
+  window.__monetagSdkLoadPromise = new Promise((resolve) => {
+    // The <meta name="monetag"> tag should already have set window.monetagID,
+    // but set it again defensively in case the meta tag is ever removed.
+    window.monetag = window.monetag || {};
+    window.monetag.monetagID = window.monetag.monetagID || MONETAG_ID;
+
+    const s = document.createElement('script');
+    s.src     = MONETAG_SDK_URL;
+    s.async   = true;
+    let settled = false;
+    const done = (ok) => { if(!settled){ settled = true; resolve(ok); } };
+    s.onload  = () => done(true);
+    s.onerror = () => done(false);
+    document.head.appendChild(s);
+    setTimeout(() => done(false), MONETAG_LOAD_TIMEOUT_MS);
+  });
+  return window.__monetagSdkLoadPromise;
+}
+
+// Show a rewarded ad. Resolves ONLY when the user actually completes it.
+// Rejects on skip, close, error, or SDK-not-available — never fakes success.
+function showRealRewardedAd(){
+  return ensureMonetagSDK().then((loaded) => {
+    if(!loaded) throw new Error('Ad system not available right now.');
+    const fn = findMonetagRewardFn();
+    if(!fn) throw new Error('Rewarded ads are not available right now.');
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (ok, err) => {
+        if(settled) return;
+        settled = true;
+        if(ok) resolve();
+        else reject(err || new Error('Ad was not completed.'));
+      };
+      // Most monetag SDKs use a callback object; some return a Promise.
+      try {
+        const ret = fn({
+          onComplete: () => finish(true),
+          onSkip:     () => finish(false, new Error('Ad was skipped.')),
+          onClose:    () => finish(false, new Error('Ad was closed before completion.')),
+          onError:    (e) => finish(false, e instanceof Error ? e : new Error('Ad failed to load.')),
+        });
+        if(ret && typeof ret.then === 'function'){
+          ret.then(
+            () => finish(true),
+            (e) => finish(false, e instanceof Error ? e : new Error('Ad failed.'))
+          );
+        }
+      } catch(e){
+        finish(false, e instanceof Error ? e : new Error('Ad failed to start.'));
+      }
+    });
+  });
+}
+
 function playTone(freq,type,vol,dur,t){
   if(!audioCtx||vol<0.002) return;
   const o=audioCtx.createOscillator(), g=audioCtx.createGain();
@@ -924,9 +1024,25 @@ function initLevel(){
   mmDirty = true;
   playerStepTimer=0;
 
-  banner.textContent='LEVEL '+level;
-  banner.style.opacity='1';
-  setTimeout(()=>banner.style.opacity='0',1800);
+  // ── Threat Intel Briefing banner ──
+  const monsterCount = level + 1;
+  const speedPct = Math.round(SPEED_PER_LEVEL * (level - 1) * 100);
+  const ventCount = NUM_VENTS;
+  const lvlLine = banner.querySelector('.lvl-line');
+  const intelLine = banner.querySelector('.intel-line');
+  lvlLine.textContent = 'LEVEL ' + level;
+  let intel = monsterCount + ' stalker' + (monsterCount > 1 ? 's' : '');
+  if(speedPct > 0) intel += '<span class="intel-sep">·</span>+' + speedPct + '% speed';
+  intel += '<span class="intel-sep">·</span>' + ventCount + ' vents';
+  intelLine.innerHTML = intel;
+  // Flicker-in the level number, then reveal intel line with a slight stagger
+  intelLine.style.opacity = '0';
+  banner.classList.remove('flicker-in');
+  void banner.offsetWidth;  // force reflow to restart animation
+  banner.classList.add('flicker-in');
+  banner.style.opacity = '1';
+  setTimeout(() => { intelLine.style.opacity = '1'; intelLine.style.transition = 'opacity 0.3s'; }, 350);
+  setTimeout(() => { banner.style.opacity = '0'; }, 2400);
   document.getElementById('lvlDisplay').textContent='LEVEL '+level;
 }
 
@@ -1798,33 +1914,26 @@ function showGameOver(){
   overlay.style.display='flex';
 }
 
-function showRewardedAdForRevive(){
-  try {
-    window.open('https://omg10.com/4/11221132', '_blank');
-        return Promise.resolve();
-  } catch (e) {
-    return Promise.reject(new Error('Popup blocked! Please allow popups to revive.'));
-  }
-}
-
 function watchAdToRevive(){
   if(!isDead||reviveInProgress) return;
   ensureAudio();
   const btn=document.getElementById('reviveBtn');
   const status=document.getElementById('adStatus');
   reviveInProgress=true;
-  if(btn){ btn.disabled=true; btn.textContent='LOADING AD...'; }
-  if(status) status.textContent='Please watch the full ad to revive.';
-  showRewardedAdForRevive().then(()=>{
-   overlay.innerHTML = `
-      <h1>AD COMPLETE</h1>
-      <p>Ready to jump back into the dark?</p>
-      <button class="btn" onclick="resumeFromAd()">TAP TO RESUME</button>
-    `;
-  }).catch(err=>{
-    reviveInProgress=false;
-    if(btn){ btn.disabled=false; btn.textContent='WATCH AD TO REVIVE'; }
-    if(status) status.textContent=(err&&err.message)?err.message:'Ad was not completed. Revive unavailable.';
+  if(btn){ btn.disabled=true; btn.textContent='LOADING AD…'; }
+  if(status) status.textContent='Loading rewarded ad…';
+
+  // The SDK only resolves after the user actually completes the ad, so we
+  // can revive immediately on success — no fake "TAP TO RESUME" step.
+  showRealRewardedAd().then(() => {
+    reviveInProgress = false;
+    revivePlayer();
+  }).catch(err => {
+    reviveInProgress = false;
+    if(btn){ btn.disabled = false; btn.textContent = 'WATCH AD TO REVIVE'; }
+    if(status) status.textContent = (err && err.message)
+      ? err.message
+      : 'Ad was not completed. Please try again, or use TRY AGAIN to restart.';
   });
 }
 
@@ -1848,24 +1957,7 @@ function moveMonstersAwayFromPlayer(){
     m.seen=false; m.scareReadyAt=performance.now()/1000+SCARE_COOLDOWN;
   }
 }
-async function resumeFromAd() {
-  ensureAudio();
-  playReviveVoice();
-  const isPhone = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  if (isPhone) {
-    const element = document.documentElement;
-    const rfs = element.requestFullscreen || element.webkitRequestFullscreen || element.msRequestFullscreen;
-    if (rfs) {
-      try { rfs.call(element).catch(() => {}); } catch (e) {}
-    }
-    if (screen.orientation && screen.orientation.lock) {
-      try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {}
-    }
-  }
-  await waitForStableViewport();
-  revivePlayer();
-  resizeGame('resume-from-ad');
-}
+
 function revivePlayer(){
   isDead=false; isWon=false; deathAnimTimer=0; reviveInProgress=false;
   reviveInvincibleTimer=3.0;
@@ -2005,5 +2097,5 @@ if(window.visualViewport){
   window.visualViewport.addEventListener('resize', ()=>resizeGame('visualViewport'));
 }
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14be028e8a9d36a',t:'MTc4Mjk3NjY5Nw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c0a579bd535f6',t:'MTc4Mjk3ODQyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c2518ed351e52',t:'MTc4Mjk3OTUyMQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
