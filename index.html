@@ -90,6 +90,18 @@
   /* ── Light reveal "active" badge (top-center, fades over 3s) ── */
   #revealBadge{position:absolute;top:64px;left:50%;transform:translateX(-50%);background:rgba(255,200,80,0.92);color:#000;padding:6px 14px;font-family:'Courier New',monospace;font-size:12px;font-weight:bold;letter-spacing:3px;border-radius:2px;box-shadow:0 0 18px rgba(255,200,80,0.7);display:none;z-index:30;pointer-events:none;}
   #revealBadge .timer{color:#5a3500;font-weight:bold;}
+  /* ── Freeze gadget: locked state (before unlock level) ── */
+  .gadget-btn.locked{border-color:rgba(160,170,180,0.3);color:#666;background:rgba(20,24,30,0.5);}
+  .gadget-btn.locked:hover{border-color:rgba(180,210,255,0.55);background:rgba(180,210,255,0.08);color:#9bb;}
+  .gadget-btn.locked .count{background:rgba(110,120,130,0.5);color:#222;}
+  .gadget-btn.freeze-active{background:rgba(140,210,255,0.5);color:#000;animation:gadgetFreezePulse 0.4s ease-in-out infinite alternate;}
+  @keyframes gadgetFreezePulse{from{box-shadow:0 0 4px rgba(140,210,255,0.6);}to{box-shadow:0 0 16px rgba(140,210,255,1);}}
+  /* ── Freeze active badge (top-center, just below reveal badge when both) ── */
+  #freezeBadge{position:absolute;top:64px;left:50%;transform:translateX(-50%);background:rgba(140,210,255,0.92);color:#000;padding:6px 14px;font-family:'Courier New',monospace;font-size:12px;font-weight:bold;letter-spacing:3px;border-radius:2px;box-shadow:0 0 18px rgba(140,210,255,0.7);display:none;z-index:30;pointer-events:none;}
+  #freezeBadge .timer{color:#0a2840;font-weight:bold;}
+  #freezeBadge.shifted{top:104px;}
+  /* ── Gadget toast (transient message — "unlock at level 6" etc.) ── */
+  #gadgetToast{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:rgba(14,18,24,0.94);color:#ffc850;border:1px solid rgba(255,200,80,0.5);padding:8px 18px;font-family:'Courier New',monospace;font-size:12px;letter-spacing:2px;border-radius:3px;pointer-events:none;display:none;z-index:45;box-shadow:0 0 14px rgba(255,200,80,0.25);max-width:90%;text-align:center;}
 </style>
 </head>
 <body>
@@ -102,9 +114,12 @@
     <div id="playerHud"><span id="playerName"></span><a id="playerLogout">logout</a></div>
     <div id="gadgetHud">
       <button id="lightBtn" class="gadget-btn"><span class="icon">☀</span>LIGHT<span class="count" id="lightCount">3</span></button>
+      <button id="freezeBtn" class="gadget-btn locked"><span class="icon">🔒</span>FREEZE<span class="count" id="freezeCount">3</span></button>
     </div>
   </div>
   <div id="revealBadge">LIGHT REVEAL <span class="timer">3.0</span></div>
+  <div id="freezeBadge">FREEZE <span class="timer">5.0</span></div>
+  <div id="gadgetToast"></div>
   <div id="heartbeat"></div>
   <div id="noise"><canvas id="noiseCanvas"></canvas></div>
   <div id="levelBanner"><span class="lvl-line">LEVEL 1</span><span class="intel-line"></span></div>
@@ -1067,7 +1082,10 @@ function updateOneMonster(dt,m){
   // While hiding in a vent the monster can't see, hear, or track you at all.
   if(inVent){
     m.alertLevel=0; m.lastKnownPX=-1; m.lastKnownPY=-1;
-  } else {
+  } else if(!gadgets.freezeActive){
+    // Frozen monsters are inert: no proximity accumulation (so heartbeat and
+    // drone calm down), no hearing, no vision. They stay exactly where they
+    // were when freeze hit and resume normally when it ends.
     // Proximity: nearest monster wins (aggregated across all in the wrapper below)
     const prox=Math.max(0,1-dist/PROX_MAX_DIST);
     if(prox>monsterProximity) monsterProximity=prox;
@@ -1107,6 +1125,15 @@ function updateOneMonster(dt,m){
       } while((maze[ty][tx]!==0||Math.hypot(tx-m.x,ty-m.y)<3)&&tries<40);
       if(maze[ty][tx]===0) m.path=bfs(m.x,m.y,tx,ty);
     }
+  }
+
+  // Freeze gadget: stop monsters from moving entirely. We keep the proximity
+  // and alert-tracking updates above (so they resume hunting smoothly when
+  // freeze ends) but skip repath + movement here.
+  if (typeof gadgets !== 'undefined' && gadgets.freezeActive) {
+    // Skip the rest of this monster's update tick — no path, no step, no
+    // move. They stay exactly where they are.
+    return;
   }
 
   const spd=(m.alertLevel===1?MONSTER_CHASE:MONSTER_WANDER)*monsterSpeedMul();
@@ -1511,15 +1538,63 @@ function drawGame(){
     const mx=m.px,my=m.py;
     ctx.save();
     ctx.globalAlpha=alpha;
-    // Red aura
-    const mg=ctx.createRadialGradient(mx,my,2,mx,my,CELL*1.1);
-    mg.addColorStop(0,'rgba(180,0,20,0.6)'); mg.addColorStop(1,'rgba(80,0,10,0)');
-    ctx.fillStyle=mg; ctx.beginPath(); ctx.arc(mx,my,CELL*1.1,0,Math.PI*2); ctx.fill();
+    if (gadgets.freezeActive) {
+      // ── Frozen monster: icy aura instead of the threatening red one ──
+      const ice = ctx.createRadialGradient(mx,my,CELL*0.3,mx,my,CELL*1.35);
+      ice.addColorStop(0,  'rgba(200,235,255,0.55)');
+      ice.addColorStop(0.55,'rgba(140,200,255,0.40)');
+      ice.addColorStop(1,  'rgba(140,200,255,0)');
+      ctx.fillStyle = ice;
+      ctx.beginPath(); ctx.arc(mx,my,CELL*1.35,0,Math.PI*2); ctx.fill();
+    } else {
+      // Red aura (threatening, normal state)
+      const mg=ctx.createRadialGradient(mx,my,2,mx,my,CELL*1.1);
+      mg.addColorStop(0,'rgba(180,0,20,0.6)'); mg.addColorStop(1,'rgba(80,0,10,0)');
+      ctx.fillStyle=mg; ctx.beginPath(); ctx.arc(mx,my,CELL*1.1,0,Math.PI*2); ctx.fill();
+    }
     // Sprite (white icon on black bg)
     const sz=CELL*1.1;
     ctx.globalCompositeOperation='screen';
     ctx.globalAlpha=alpha*0.85;
     drawSprite(ctx,monsterImg,mx,my,sz,sz,m.facing);
+    // ── Iceberg overlay: ice shell ring + crystals, only when frozen ──
+    if (gadgets.freezeActive) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = alpha * 0.7;
+      // Ice shell ring (the "iceberg" outline)
+      ctx.strokeStyle = 'rgba(225,245,255,0.65)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(mx, my, CELL*1.12, 0, Math.PI*2);
+      ctx.stroke();
+      // Inner faint ring for depth
+      ctx.globalAlpha = alpha * 0.35;
+      ctx.strokeStyle = 'rgba(180,220,240,0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(mx, my, CELL*0.85, 0, Math.PI*2);
+      ctx.stroke();
+      // Ice crystals around the shell — diamond shapes at 6 angles
+      ctx.globalAlpha = alpha * 0.85;
+      ctx.fillStyle = 'rgba(240,250,255,0.9)';
+      const baseAngles = [0, Math.PI*0.4, Math.PI*0.8, Math.PI*1.2, Math.PI*1.6, Math.PI*2.0];
+      for (let i = 0; i < baseAngles.length; i++) {
+        const a = baseAngles[i] + Date.now() / 4000;  // very slow rotation
+        const cx = mx + Math.cos(a) * CELL * 1.18;
+        const cy = my + Math.sin(a) * CELL * 1.18;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(a + Math.PI/4);
+        ctx.beginPath();
+        ctx.moveTo(0, -3.2);
+        ctx.lineTo(2.6, 0);
+        ctx.lineTo(0, 3.2);
+        ctx.lineTo(-2.6, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+    }
     ctx.restore();
   }
   // cut the scream once no monster is in sight (grace period prevents micro-flicker clipping)
@@ -1564,6 +1639,16 @@ function drawGame(){
     ltg.addColorStop(0,'rgba(255,170,60,0.10)');
     ltg.addColorStop(1,'rgba(255,140,40,0.04)');
     ctx.fillStyle=ltg; ctx.fillRect(0,0,vW,vH);
+  }
+
+  // Freeze gadget active: paint a soft cyan tint over the whole maze so
+  // it visually reads "everything is frozen." Subtle so it doesn't fight
+  // the torch warmth; strong enough to be unmistakable.
+  if (gadgets.freezeActive) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(140,210,255,0.10)';
+    ctx.fillRect(0, 0, vW, vH);
+    ctx.restore();
   }
 
   // Activation flash — brief white overlay that fades out over ~0.55s
@@ -1826,7 +1911,11 @@ function updateHorrorEffects(dt){
 // ═══ COLLISION ═══
 function checkEvents(){
   if(isDead||isWon||inVent) return;
-  if(reviveInvincibleTimer<=0 && monsters.some(m=>m.x===player.x&&m.y===player.y)){
+  // When freeze is active, monsters are solid ice — player can walk right
+  // through them. Collision is the only thing we suppress; the proximity
+  // indicator (heartbeat, drone) is already muted in updateOneMonster
+  // because frozen monsters don't accumulate proximity.
+  if(!gadgets.freezeActive && reviveInvincibleTimer<=0 && monsters.some(m=>m.x===player.x&&m.y===player.y)){
     isDead=true; playScream();
     setTimeout(showGameOver,1900);
   }
@@ -2450,24 +2539,33 @@ if (document.readyState === 'loading') {
 // flash on activation, then the fog-of-war is skipped while the timer
 // counts down. Count is server-authoritative for logged-in users and
 // localStorage-authoritative for guests.
+const FREEZE_UNLOCK_LEVEL = 6;
+const FREEZE_DURATION = 5.0;  // seconds monsters stay frozen
 const gadgets = {
   light: 0,
   lightActive: false,
   lightTimer: 0,
+  freeze: 0,
+  freezeActive: false,
+  freezeTimer: 0,
 };
 let lightRevealFlash = null;  // {alpha, timer} for the on-activation flash
 
-// Pull the gadget count from the right source and refresh the HUD.
+// Pull the gadget counts from the right source and refresh the HUD.
 function refreshGadgetCount() {
   if (auth.token && auth.player) {
-    gadgets.light = (typeof auth.player.gadgets_light === 'number') ? auth.player.gadgets_light : 0;
+    gadgets.light  = (typeof auth.player.gadgets_light  === 'number') ? auth.player.gadgets_light  : 0;
+    gadgets.freeze = (typeof auth.player.gadgets_freeze === 'number') ? auth.player.gadgets_freeze : 0;
   } else {
     // Guest: localStorage, default 3 for new sessions.
     try {
-      const v = parseInt(localStorage.getItem('darklaybrinth_g_light') || '3', 10);
-      gadgets.light = Number.isFinite(v) && v >= 0 ? v : 3;
+      const vl = parseInt(localStorage.getItem('darklaybrinth_g_light')  || '3', 10);
+      const vf = parseInt(localStorage.getItem('darklaybrinth_g_freeze') || '3', 10);
+      gadgets.light  = Number.isFinite(vl) && vl >= 0 ? vl : 3;
+      gadgets.freeze = Number.isFinite(vf) && vf >= 0 ? vf : 3;
     } catch (e) {
       gadgets.light = 3;
+      gadgets.freeze = 3;
     }
   }
   updateGadgetHud();
@@ -2475,7 +2573,10 @@ function refreshGadgetCount() {
 
 function saveGuestGadgetCount() {
   if (auth.token) return;  // logged-in users go through /sync
-  try { localStorage.setItem('darklaybrinth_g_light', String(gadgets.light)); } catch (e) {}
+  try {
+    localStorage.setItem('darklaybrinth_g_light',  String(gadgets.light));
+    localStorage.setItem('darklaybrinth_g_freeze', String(gadgets.freeze));
+  } catch (e) {}
 }
 
 // Activate the light reveal gadget. Silent on failure — never disrupts gameplay.
@@ -2509,36 +2610,117 @@ async function useLightReveal() {
 }
 
 function updateGadgetHud() {
-  const btn = document.getElementById('lightBtn');
-  const countEl = document.getElementById('lightCount');
-  if (!btn || !countEl) return;
-  countEl.textContent = gadgets.light;
-  btn.disabled = gadgets.light <= 0 || gadgets.lightActive;
-  btn.classList.toggle('armed', gadgets.lightActive);
+  // Light button
+  const lightBtn = document.getElementById('lightBtn');
+  const lightCountEl = document.getElementById('lightCount');
+  if (lightBtn && lightCountEl) {
+    lightCountEl.textContent = gadgets.light;
+    lightBtn.disabled = gadgets.light <= 0 || gadgets.lightActive;
+    lightBtn.classList.toggle('armed', gadgets.lightActive);
+  }
+
+  // Freeze button — locked state depends on level, not on count.
+  const freezeBtn = document.getElementById('freezeBtn');
+  const freezeCountEl = document.getElementById('freezeCount');
+  if (freezeBtn && freezeCountEl) {
+    freezeCountEl.textContent = gadgets.freeze;
+    const isLocked = (typeof level === 'undefined') || level < FREEZE_UNLOCK_LEVEL;
+    freezeBtn.classList.toggle('locked', isLocked);
+    freezeBtn.classList.toggle('freeze-active', gadgets.freezeActive && !isLocked);
+    // Locked buttons stay clickable so we can show the unlock message.
+    // Otherwise disable when no charges or already active.
+    if (isLocked) {
+      freezeBtn.disabled = false;
+    } else {
+      freezeBtn.disabled = gadgets.freeze <= 0 || gadgets.freezeActive;
+    }
+  }
 }
 
-// Reset the gadget count to 3 and persist. Called on every level transition
-// (via checkEvents → level++) and on restartGame (death → restart). The
-// user wanted the count to always be 3 at the start of a level/match.
+// Reset the gadget counts to 3 and persist. Called on every level
+// transition (via checkEvents → level++) and on restartGame (death →
+// restart). The user wanted the counts to always be 3 at the start.
 function resetGadgetsToMax() {
   gadgets.light = 3;
+  gadgets.freeze = 3;
+  // Clear any active timers so a fresh level doesn't carry over an in-flight effect.
+  gadgets.lightActive = false;
+  gadgets.lightTimer = 0;
+  gadgets.freezeActive = false;
+  gadgets.freezeTimer = 0;
   saveGuestGadgetCount();
   updateGadgetHud();
-  // For logged-in players, push the reset to the server so a logout/login
-  // cycle also shows 3. Silent failure — game keeps going if the server is
-  // unreachable.
   if (auth.token) {
     apiCall('/sync', {
       method: 'POST',
-      body: JSON.stringify({ gadgets_light: 3 }),
+      body: JSON.stringify({ gadgets_light: 3, gadgets_freeze: 3 }),
     }).then(result => {
       if (result && result.player) auth.player = result.player;
     }).catch(() => {});
   }
 }
 
-// Per-frame update for the light reveal timer and the on-activation flash.
+// Freeze monsters: stops movement for ~5 seconds. Locked until level 6;
+// clicking before unlock shows a toast message ("Unlocks at Level 6").
+async function useFreeze() {
+  if (typeof isDead !== 'undefined' && isDead) return;
+  if (typeof isWon !== 'undefined' && isWon) return;
+  if (typeof inVent !== 'undefined' && inVent) return;
+  if (gadgets.freezeActive) return;
+
+  // Locked: show message and exit without consuming a charge.
+  if ((typeof level === 'undefined') || level < FREEZE_UNLOCK_LEVEL) {
+    showGadgetMessage('FREEZE unlocks at Level ' + FREEZE_UNLOCK_LEVEL);
+    return;
+  }
+  if (gadgets.freeze <= 0) return;
+
+  gadgets.freeze--;
+  gadgets.freezeActive = true;
+  gadgets.freezeTimer = FREEZE_DURATION;
+  // Calm the proximity/heartbeat immediately — frozen monsters stop
+  // accumulating proximity in updateOneMonster, but we also drop any
+  // leftover value so the audio doesn't lag behind the visual.
+  monsterProximity = 0;
+  // Cut the scare voice if it was playing, since the threat is gone.
+  if (typeof stopScareVoice === 'function') stopScareVoice();
+  saveGuestGadgetCount();
+  updateGadgetHud();
+
+  if (auth.token) {
+    try {
+      const result = await apiCall('/sync', {
+        method: 'POST',
+        body: JSON.stringify({ gadgets_freeze: gadgets.freeze }),
+      });
+      auth.player = result.player;
+    } catch (e) {}
+  }
+}
+
+// Brief toast message above the HUD. Used for "unlocks at level N" hints.
+function showGadgetMessage(text) {
+  const el = document.getElementById('gadgetToast');
+  if (!el) return;
+  el.textContent = text;
+  el.style.opacity = '1';
+  el.style.display = 'block';
+  clearTimeout(showGadgetMessage._t);
+  clearTimeout(showGadgetMessage._fade);
+  showGadgetMessage._t = setTimeout(() => {
+    el.style.transition = 'opacity 0.4s ease-out';
+    el.style.opacity = '0';
+    showGadgetMessage._fade = setTimeout(() => {
+      el.style.display = 'none';
+      el.style.transition = '';
+    }, 420);
+  }, 2200);
+}
+
+// Per-frame update for the light reveal timer, the freeze timer, and the
+// on-activation flash.
 function updateGadgetTimers(dt) {
+  // Light reveal
   if (gadgets.lightActive) {
     gadgets.lightTimer -= dt;
     if (gadgets.lightTimer <= 0) {
@@ -2546,7 +2728,6 @@ function updateGadgetTimers(dt) {
       gadgets.lightTimer = 0;
       updateGadgetHud();
     }
-    // Update the floating badge with remaining seconds.
     const badge = document.getElementById('revealBadge');
     if (badge) {
       if (gadgets.lightActive) {
@@ -2555,6 +2736,27 @@ function updateGadgetTimers(dt) {
         if (t) t.textContent = gadgets.lightTimer.toFixed(1);
       } else {
         badge.style.display = 'none';
+      }
+    }
+  }
+  // Freeze timer
+  if (gadgets.freezeActive) {
+    gadgets.freezeTimer -= dt;
+    if (gadgets.freezeTimer <= 0) {
+      gadgets.freezeActive = false;
+      gadgets.freezeTimer = 0;
+      updateGadgetHud();
+    }
+    const fbadge = document.getElementById('freezeBadge');
+    if (fbadge) {
+      if (gadgets.freezeActive) {
+        // If the light badge is also showing, push freeze badge below it.
+        fbadge.classList.toggle('shifted', !!gadgets.lightActive);
+        fbadge.style.display = 'block';
+        const t = fbadge.querySelector('.timer');
+        if (t) t.textContent = gadgets.freezeTimer.toFixed(1);
+      } else {
+        fbadge.style.display = 'none';
       }
     }
   }
@@ -2577,9 +2779,11 @@ function drawLightRevealFlash(ctx) {
 }
 
 function bindGadgetEvents() {
-  const btn = document.getElementById('lightBtn');
-  if (btn) btn.addEventListener('click', useLightReveal);
+  const lbtn = document.getElementById('lightBtn');
+  if (lbtn) lbtn.addEventListener('click', useLightReveal);
+  const fbtn = document.getElementById('freezeBtn');
+  if (fbtn) fbtn.addEventListener('click', useFreeze);
 }
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c0a579bd535f6',t:'MTc4Mjk3ODQyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14d951e397e1c97',t:'MTc4Mjk5NDU5NQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c0a579bd535f6',t:'MTc4Mjk3ODQyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14dac71bfaa5d4a',t:'MTc4Mjk5NTU1MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
