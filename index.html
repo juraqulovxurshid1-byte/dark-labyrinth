@@ -363,143 +363,6 @@ function playGameOverVoice() {
     gameoverAudio.play().catch(()=>{});
   }
 }
-
-// ═══ REAL MONETAG REWARDED AD ═══
-// Replaces the previous "open a tab, claim success" pattern with monetag's
-// real rewarded-ad SDK. The SDK only fires its completion callback after the
-// user actually watches the ad — we gate revive on that, with safe fallbacks
-// if the SDK isn't loaded, the API isn't exposed, or the user skips.
-// Never fabricate success.
-//
-// NOTE: monetag's exact rewarded-ad method signature varies by product
-// version. The candidates below cover the most common ones. If monetag's
-// API for your account uses a different shape, adjust findMonetagRewardFn()
-// and the callback object passed to it.
-
-const MONETAG_ID                = '8f063ae3b78d60e5f890d6f073f86581';
-const MONETAG_SDK_URL           = 'https://cdn.monetag.com/js/sdk.js';
-const MONETAG_LOAD_TIMEOUT_MS   = 3000;
-
-// Probe monetag's rewarded-ad entry points. Per the dashboard, the formats
-// that exist are "Rewarded Popup" and "Rewarded Interstitial", so their SDK
-// methods are most likely showRewardedPopup / showRewardedInterstitial.
-// Fall back to a unified show(type, options) API if those aren't there.
-function findMonetagRewardFn(){
-  const specific = [
-    [window.MonetagSDK, 'showRewardedPopup'],
-    [window.MonetagSDK, 'showRewardedInterstitial'],
-    [window.MonetagSDK, 'showRewardAd'],
-    [window.MonetagSDK, 'showRewardedAd'],
-    [window.monetag,    'showRewardedPopup'],
-    [window.monetag,    'showRewardedInterstitial'],
-    [window.monetag,    'showRewardAd'],
-    [window.monetag,    'showRewardedAd'],
-    [window.Monetag,    'showRewardedPopup'],
-    [window.Monetag,    'showRewardAd'],
-  ];
-  for(const [ns, name] of specific){
-    if(ns && typeof ns[name] === 'function'){
-      return { kind:'specific', fn: ns[name].bind(ns), name };
-    }
-  }
-  // Unified API: MonetagSDK.show('rewarded_popup', opts) or show('rewarded', opts).
-  const unified = [
-    [window.MonetagSDK, 'show'],
-    [window.monetag,    'show'],
-  ];
-  for(const [ns, name] of unified){
-    if(ns && typeof ns[name] === 'function'){
-      return { kind:'unified', fn: ns[name].bind(ns), name };
-    }
-  }
-  return null;
-}
-
-// Idempotent SDK loader. Safe to call multiple times. Returns true if the
-// SDK loaded successfully, false if it failed or timed out.
-function ensureMonetagSDK(){
-  if(typeof window.MonetagSDK !== 'undefined' || typeof window.monetag !== 'undefined'){
-    return Promise.resolve(true);
-  }
-  if(window.__monetagSdkLoadPromise) return window.__monetagSdkLoadPromise;
-  window.__monetagSdkLoadPromise = new Promise((resolve) => {
-    // The <meta name="monetag"> tag should already have set window.monetagID,
-    // but set it again defensively in case the meta tag is ever removed.
-    window.monetag = window.monetag || {};
-    window.monetag.monetagID = window.monetag.monetagID || MONETAG_ID;
-
-    const s = document.createElement('script');
-    s.src     = MONETAG_SDK_URL;
-    s.async   = true;
-    let settled = false;
-    const done = (ok) => { if(!settled){ settled = true; resolve(ok); } };
-    s.onload  = () => done(true);
-    s.onerror = () => done(false);
-    document.head.appendChild(s);
-    setTimeout(() => done(false), MONETAG_LOAD_TIMEOUT_MS);
-  });
-  return window.__monetagSdkLoadPromise;
-}
-
-// Show a rewarded ad. Resolves ONLY when the user actually completes it.
-// Rejects on skip, close, error, or SDK-not-available — never fakes success.
-function showRealRewardedAd(){
-  return ensureMonetagSDK().then((loaded) => {
-    if(!loaded) throw new Error('Ad system not available right now.');
-    const found = findMonetagRewardFn();
-    if(!found){
-      console.info('[monetag] SDK loaded but no rewarded-ad method found. ' +
-        'Available on MonetagSDK:', window.MonetagSDK,
-        'Available on monetag:', window.monetag);
-      throw new Error('Rewarded ads are not available right now.');
-    }
-    console.info('[monetag] Using rewarded-ad method:', found.name, '(' + found.kind + ')');
-
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      const finish = (ok, err) => {
-        if(settled) return;
-        settled = true;
-        if(ok) resolve();
-        else reject(err || new Error('Ad was not completed.'));
-      };
-      // Standard callback object used by monetag's rewarded units.
-      const opts = {
-        onComplete: () => finish(true),
-        onSkip:     () => finish(false, new Error('Ad was skipped.')),
-        onClose:    () => finish(false, new Error('Ad was closed before completion.')),
-        onError:    (e) => finish(false, e instanceof Error ? e : new Error('Ad failed to load.')),
-      };
-      try {
-        let ret;
-        if(found.kind === 'unified'){
-          // Some SDKs expose a single show(type, opts) — try the most common
-          // type strings in order. If the SDK throws on an unknown type,
-          // move on to the next.
-          const types = ['rewarded', 'rewarded_popup', 'rewarded_interstitial', 'rewardedPopup', 'rewardedInterstitial'];
-          let lastErr;
-          for(const t of types){
-            try { ret = found.fn(t, opts); break; }
-            catch(e){ lastErr = e; }
-          }
-          if(ret === undefined && lastErr) throw lastErr;
-        } else {
-          ret = found.fn(opts);
-        }
-        // Some SDK versions return a promise instead of using callbacks.
-        if(ret && typeof ret.then === 'function'){
-          ret.then(
-            () => finish(true),
-            (e) => finish(false, e instanceof Error ? e : new Error('Ad failed.'))
-          );
-        }
-      } catch(e){
-        finish(false, e instanceof Error ? e : new Error('Ad failed to start.'));
-      }
-    });
-  });
-}
-
 function playTone(freq,type,vol,dur,t){
   if(!audioCtx||vol<0.002) return;
   const o=audioCtx.createOscillator(), g=audioCtx.createGain();
@@ -1956,26 +1819,33 @@ function showGameOver(){
   overlay.style.display='flex';
 }
 
+function showRewardedAdForRevive(){
+  try {
+    window.open('https://omg10.com/4/11221132', '_blank');
+        return Promise.resolve();
+  } catch (e) {
+    return Promise.reject(new Error('Popup blocked! Please allow popups to revive.'));
+  }
+}
+
 function watchAdToRevive(){
   if(!isDead||reviveInProgress) return;
   ensureAudio();
   const btn=document.getElementById('reviveBtn');
   const status=document.getElementById('adStatus');
   reviveInProgress=true;
-  if(btn){ btn.disabled=true; btn.textContent='LOADING AD…'; }
-  if(status) status.textContent='Loading rewarded ad…';
-
-  // The SDK only resolves after the user actually completes the ad, so we
-  // can revive immediately on success — no fake "TAP TO RESUME" step.
-  showRealRewardedAd().then(() => {
-    reviveInProgress = false;
-    revivePlayer();
-  }).catch(err => {
-    reviveInProgress = false;
-    if(btn){ btn.disabled = false; btn.textContent = 'WATCH AD TO REVIVE'; }
-    if(status) status.textContent = (err && err.message)
-      ? err.message
-      : 'Ad was not completed. Please try again, or use TRY AGAIN to restart.';
+  if(btn){ btn.disabled=true; btn.textContent='LOADING AD...'; }
+  if(status) status.textContent='Please watch the full ad to revive.';
+  showRewardedAdForRevive().then(()=>{
+   overlay.innerHTML = `
+      <h1>AD COMPLETE</h1>
+      <p>Ready to jump back into the dark?</p>
+      <button class="btn" onclick="resumeFromAd()">TAP TO RESUME</button>
+    `;
+  }).catch(err=>{
+    reviveInProgress=false;
+    if(btn){ btn.disabled=false; btn.textContent='WATCH AD TO REVIVE'; }
+    if(status) status.textContent=(err&&err.message)?err.message:'Ad was not completed. Revive unavailable.';
   });
 }
 
@@ -1999,7 +1869,24 @@ function moveMonstersAwayFromPlayer(){
     m.seen=false; m.scareReadyAt=performance.now()/1000+SCARE_COOLDOWN;
   }
 }
-
+async function resumeFromAd() {
+  ensureAudio();
+  playReviveVoice();
+  const isPhone = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (isPhone) {
+    const element = document.documentElement;
+    const rfs = element.requestFullscreen || element.webkitRequestFullscreen || element.msRequestFullscreen;
+    if (rfs) {
+      try { rfs.call(element).catch(() => {}); } catch (e) {}
+    }
+    if (screen.orientation && screen.orientation.lock) {
+      try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {}
+    }
+  }
+  await waitForStableViewport();
+  revivePlayer();
+  resizeGame('resume-from-ad');
+}
 function revivePlayer(){
   isDead=false; isWon=false; deathAnimTimer=0; reviveInProgress=false;
   reviveInvincibleTimer=3.0;
@@ -2139,5 +2026,5 @@ if(window.visualViewport){
   window.visualViewport.addEventListener('resize', ()=>resizeGame('visualViewport'));
 }
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c0a579bd535f6',t:'MTc4Mjk3ODQyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c336c5bed1e52',t:'MTc4Mjk4MDEwOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c0a579bd535f6',t:'MTc4Mjk3ODQyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
