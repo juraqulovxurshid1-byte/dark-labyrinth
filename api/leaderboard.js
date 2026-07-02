@@ -60,8 +60,10 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  // Tiny cache hint: leaderboard changes only when someone wins a level, so
-  // 10s cache is safe and reduces DB load if many players open the screen.
-  res.setHeader('Cache-Control', 's-maxage=10, stale-while-revalidate=30');
+  // No caching. The response depends on the Authorization header (returns
+  // the caller's own rank + stats in `you`), and Vercel's edge cache keys
+  // by URL only — not by Authorization. With a cache, user A's "you" object
+  // could be served to user B if their requests were within the TTL window.
+  // For a small game this is fine performance-wise; we re-query each call.
   return res.json({ top: top || [], you });
 };
