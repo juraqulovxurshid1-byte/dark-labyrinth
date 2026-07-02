@@ -380,17 +380,37 @@ const MONETAG_ID                = '8f063ae3b78d60e5f890d6f073f86581';
 const MONETAG_SDK_URL           = 'https://cdn.monetag.com/js/sdk.js';
 const MONETAG_LOAD_TIMEOUT_MS   = 3000;
 
-// Probe the most common monetag rewarded-ad entry points across versions.
+// Probe monetag's rewarded-ad entry points. Per the dashboard, the formats
+// that exist are "Rewarded Popup" and "Rewarded Interstitial", so their SDK
+// methods are most likely showRewardedPopup / showRewardedInterstitial.
+// Fall back to a unified show(type, options) API if those aren't there.
 function findMonetagRewardFn(){
-  const candidates = [
+  const specific = [
+    [window.MonetagSDK, 'showRewardedPopup'],
+    [window.MonetagSDK, 'showRewardedInterstitial'],
     [window.MonetagSDK, 'showRewardAd'],
     [window.MonetagSDK, 'showRewardedAd'],
+    [window.monetag,    'showRewardedPopup'],
+    [window.monetag,    'showRewardedInterstitial'],
     [window.monetag,    'showRewardAd'],
     [window.monetag,    'showRewardedAd'],
+    [window.Monetag,    'showRewardedPopup'],
     [window.Monetag,    'showRewardAd'],
   ];
-  for(const [ns, name] of candidates){
-    if(ns && typeof ns[name] === 'function') return ns[name].bind(ns);
+  for(const [ns, name] of specific){
+    if(ns && typeof ns[name] === 'function'){
+      return { kind:'specific', fn: ns[name].bind(ns), name };
+    }
+  }
+  // Unified API: MonetagSDK.show('rewarded_popup', opts) or show('rewarded', opts).
+  const unified = [
+    [window.MonetagSDK, 'show'],
+    [window.monetag,    'show'],
+  ];
+  for(const [ns, name] of unified){
+    if(ns && typeof ns[name] === 'function'){
+      return { kind:'unified', fn: ns[name].bind(ns), name };
+    }
   }
   return null;
 }
@@ -426,8 +446,14 @@ function ensureMonetagSDK(){
 function showRealRewardedAd(){
   return ensureMonetagSDK().then((loaded) => {
     if(!loaded) throw new Error('Ad system not available right now.');
-    const fn = findMonetagRewardFn();
-    if(!fn) throw new Error('Rewarded ads are not available right now.');
+    const found = findMonetagRewardFn();
+    if(!found){
+      console.info('[monetag] SDK loaded but no rewarded-ad method found. ' +
+        'Available on MonetagSDK:', window.MonetagSDK,
+        'Available on monetag:', window.monetag);
+      throw new Error('Rewarded ads are not available right now.');
+    }
+    console.info('[monetag] Using rewarded-ad method:', found.name, '(' + found.kind + ')');
 
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -437,14 +463,30 @@ function showRealRewardedAd(){
         if(ok) resolve();
         else reject(err || new Error('Ad was not completed.'));
       };
-      // Most monetag SDKs use a callback object; some return a Promise.
+      // Standard callback object used by monetag's rewarded units.
+      const opts = {
+        onComplete: () => finish(true),
+        onSkip:     () => finish(false, new Error('Ad was skipped.')),
+        onClose:    () => finish(false, new Error('Ad was closed before completion.')),
+        onError:    (e) => finish(false, e instanceof Error ? e : new Error('Ad failed to load.')),
+      };
       try {
-        const ret = fn({
-          onComplete: () => finish(true),
-          onSkip:     () => finish(false, new Error('Ad was skipped.')),
-          onClose:    () => finish(false, new Error('Ad was closed before completion.')),
-          onError:    (e) => finish(false, e instanceof Error ? e : new Error('Ad failed to load.')),
-        });
+        let ret;
+        if(found.kind === 'unified'){
+          // Some SDKs expose a single show(type, opts) — try the most common
+          // type strings in order. If the SDK throws on an unknown type,
+          // move on to the next.
+          const types = ['rewarded', 'rewarded_popup', 'rewarded_interstitial', 'rewardedPopup', 'rewardedInterstitial'];
+          let lastErr;
+          for(const t of types){
+            try { ret = found.fn(t, opts); break; }
+            catch(e){ lastErr = e; }
+          }
+          if(ret === undefined && lastErr) throw lastErr;
+        } else {
+          ret = found.fn(opts);
+        }
+        // Some SDK versions return a promise instead of using callbacks.
         if(ret && typeof ret.then === 'function'){
           ret.then(
             () => finish(true),
@@ -2097,5 +2139,5 @@ if(window.visualViewport){
   window.visualViewport.addEventListener('resize', ()=>resizeGame('visualViewport'));
 }
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c0a579bd535f6',t:'MTc4Mjk3ODQyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c2518ed351e52',t:'MTc4Mjk3OTUyMQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c0a579bd535f6',t:'MTc4Mjk3ODQyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c336c5bed1e52',t:'MTc4Mjk4MDEwOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
