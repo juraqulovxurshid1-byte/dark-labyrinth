@@ -77,6 +77,19 @@
   #playerHud{font-size:10px;color:#777;margin-top:5px;letter-spacing:1px;display:none;font-family:'Courier New',monospace;}
   #playerHud a{cursor:pointer;color:#a85;text-decoration:underline;}
   #playerHud a:hover{color:#f84;}
+  /* ── Gadget HUD (top-right, below player line) ── */
+  #gadgetHud{display:flex;justify-content:flex-end;gap:6px;margin-top:7px;}
+  .gadget-btn{background:rgba(0,0,0,0.55);border:1px solid rgba(255,200,80,0.4);color:#ffc850;padding:5px 9px;font-family:'Courier New',monospace;font-size:11px;cursor:pointer;letter-spacing:1px;border-radius:2px;transition:all .15s;display:flex;align-items:center;gap:6px;user-select:none;-webkit-user-select:none;}
+  .gadget-btn:hover:not(:disabled){background:rgba(255,200,80,0.18);border-color:rgba(255,200,80,0.75);}
+  .gadget-btn:active:not(:disabled){transform:scale(0.94);}
+  .gadget-btn:disabled{opacity:0.35;cursor:not-allowed;border-color:rgba(255,200,80,0.15);}
+  .gadget-btn .icon{font-size:13px;line-height:1;}
+  .gadget-btn .count{color:#000;background:rgba(255,200,80,0.85);font-weight:bold;min-width:16px;text-align:center;padding:1px 5px;border-radius:2px;font-size:10px;}
+  .gadget-btn.armed{background:rgba(255,200,80,0.5);color:#000;animation:gadgetPulse 0.5s ease-in-out infinite alternate;}
+  @keyframes gadgetPulse{from{box-shadow:0 0 4px rgba(255,200,80,0.6);}to{box-shadow:0 0 14px rgba(255,200,80,1);}}
+  /* ── Light reveal "active" badge (top-center, fades over 3s) ── */
+  #revealBadge{position:absolute;top:64px;left:50%;transform:translateX(-50%);background:rgba(255,200,80,0.92);color:#000;padding:6px 14px;font-family:'Courier New',monospace;font-size:12px;font-weight:bold;letter-spacing:3px;border-radius:2px;box-shadow:0 0 18px rgba(255,200,80,0.7);display:none;z-index:30;pointer-events:none;}
+  #revealBadge .timer{color:#5a3500;font-weight:bold;}
 </style>
 </head>
 <body>
@@ -87,7 +100,11 @@
     <div id="lvlDisplay">LEVEL 1</div>
     <div id="stepsDisplay" style="font-size:11px;color:#855;margin-top:3px;">░░░░░░░░░░</div>
     <div id="playerHud"><span id="playerName"></span><a id="playerLogout">logout</a></div>
+    <div id="gadgetHud">
+      <button id="lightBtn" class="gadget-btn"><span class="icon">☀</span>LIGHT<span class="count" id="lightCount">3</span></button>
+    </div>
   </div>
+  <div id="revealBadge">LIGHT REVEAL <span class="timer">3.0</span></div>
   <div id="heartbeat"></div>
   <div id="noise"><canvas id="noiseCanvas"></canvas></div>
   <div id="levelBanner"><span class="lvl-line">LEVEL 1</span><span class="intel-line"></span></div>
@@ -1512,29 +1529,43 @@ function drawGame(){
   } else {
     outOfSightTimer = 0;
   }
-  // ── Torch flicker: calm when still, erratic when moving ──
-  const flickerTime = Date.now();
-  const flickerSpeed  = playerMoving ? 65 : 110;   // faster oscillation while walking
-  const flickerAmp    = playerMoving ? 0.30 : 0.12; // much wilder amplitude
-  const flickerVal    = Math.sin(flickerTime / flickerSpeed);
+  // ── Light reveal gadget: skip fog entirely while active (full maze visible) ──
+  if (!gadgets.lightActive) {
+    // ── Torch flicker: calm when still, erratic when moving ──
+    const flickerTime = Date.now();
+    const flickerSpeed  = playerMoving ? 65 : 110;   // faster oscillation while walking
+    const flickerAmp    = playerMoving ? 0.30 : 0.12; // much wilder amplitude
+    const flickerVal    = Math.sin(flickerTime / flickerSpeed);
 
-  // Fog of war — torch guttering shrinks the light slightly when moving
-  const lightMod      = playerMoving ? -0.25 : 0;   // cells of radius reduction
-  const fogRadius     = (LIGHT_RADIUS + lightMod + flickerAmp * flickerVal) * CELL;
-  const fog=ctx.createRadialGradient(ppx,ppy,0,ppx,ppy,fogRadius);
-  fog.addColorStop(0,'rgba(0,0,0,0)');
-  fog.addColorStop(0.5,'rgba(0,0,0,0)');
-  fog.addColorStop(0.72,'rgba(0,0,0,0.68)');
-  fog.addColorStop(1,'rgba(0,0,0,1)');
-  ctx.fillStyle=fog; ctx.fillRect(0,0,vW,vH);
+    // Fog of war — torch guttering shrinks the light slightly when moving
+    const lightMod      = playerMoving ? -0.25 : 0;   // cells of radius reduction
+    const fogRadius     = (LIGHT_RADIUS + lightMod + flickerAmp * flickerVal) * CELL;
+    const fog=ctx.createRadialGradient(ppx,ppy,0,ppx,ppy,fogRadius);
+    fog.addColorStop(0,'rgba(0,0,0,0)');
+    fog.addColorStop(0.5,'rgba(0,0,0,0)');
+    fog.addColorStop(0.72,'rgba(0,0,0,0.68)');
+    fog.addColorStop(1,'rgba(0,0,0,1)');
+    ctx.fillStyle=fog; ctx.fillRect(0,0,vW,vH);
 
-  // Torch warm tint — more vivid and flickery while moving
-  const tintFlicker = flickerAmp * flickerVal;
-  const tg=ctx.createRadialGradient(ppx,ppy,0,ppx,ppy,CELL*LIGHT_RADIUS);
-  tg.addColorStop(0,`rgba(255,150,30,${(0.15 + tintFlicker * 0.15).toFixed(3)})`);
-  tg.addColorStop(0.55,`rgba(255,100,10,${(0.05 + tintFlicker * 0.06).toFixed(3)})`);
-  tg.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle=tg; ctx.fillRect(0,0,vW,vH);
+    // Torch warm tint — more vivid and flickery while moving
+    const tintFlicker = flickerAmp * flickerVal;
+    const tg=ctx.createRadialGradient(ppx,ppy,0,ppx,ppy,CELL*LIGHT_RADIUS);
+    tg.addColorStop(0,`rgba(255,150,30,${(0.15 + tintFlicker * 0.15).toFixed(3)})`);
+    tg.addColorStop(0.55,`rgba(255,100,10,${(0.05 + tintFlicker * 0.06).toFixed(3)})`);
+    tg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=tg; ctx.fillRect(0,0,vW,vH);
+  } else {
+    // During reveal: draw a softer, larger warm tint so the whole maze still
+    // has the "lit by torch" warmth without any darkness. Helps reinforce
+    // that this is magic light, not just a UI glitch.
+    const ltg=ctx.createRadialGradient(ppx,ppy,0,ppx,ppy,vW*0.9);
+    ltg.addColorStop(0,'rgba(255,170,60,0.10)');
+    ltg.addColorStop(1,'rgba(255,140,40,0.04)');
+    ctx.fillStyle=ltg; ctx.fillRect(0,0,vW,vH);
+  }
+
+  // Activation flash — brief white overlay that fades out over ~0.55s
+  drawLightRevealFlash(ctx);
 
   // Player sprite (hidden while inside a vent)
   if(!inVent){
@@ -1814,6 +1845,7 @@ function loop(ts){
   if(reviveInvincibleTimer>0) reviveInvincibleTimer=Math.max(0,reviveInvincibleTimer-dt);
   if(!isDead&&!isWon){handleInput(dt);updateMonsters(dt);checkEvents();}
   else deathAnimTimer+=dt*1.3;
+  updateGadgetTimers(dt);   // light reveal countdown + on-activation flash
   updateHorrorEffects(dt);
   drawGame();
   drawMinimap();
@@ -2283,6 +2315,7 @@ async function handleAuthSubmit() {
     // from a different user (Vercel edge cache doesn't vary on Authorization).
     resetGameState();  // wipe previous session's progress from globals/HUD
     updateHudForAuth();
+    refreshGadgetCount();   // pull gadget count from server into the HUD
     hideAuthModal();
     showOverlay();
   } catch (e) {
@@ -2299,6 +2332,7 @@ function handleGuestSkip() {
   auth.player = null;
   resetGameState();  // wipe the previous session's state
   updateHudForAuth(); // refresh HUD so it shows "GUEST · login"
+  refreshGadgetCount(); // pull from localStorage for guest
   hideAuthModal();
   showOverlay();
 }
@@ -2383,11 +2417,13 @@ function bindAuthEvents() {
 // overlay, based on whether we have a valid stored token.
 async function bootstrapGame() {
   bindAuthEvents();
+  bindGadgetEvents();
   if (auth.token) {
     const restored = await restoreSession();
     if (restored) {
       await fetchPlayer();
       updateHudForAuth();
+      refreshGadgetCount();
       showOverlay();
       return;
     }
@@ -2401,6 +2437,122 @@ if (document.readyState === 'loading') {
 } else {
   bootstrapGame();
 }
+
+// ═══ GADGETS ═══
+// Light reveal: makes the entire maze visible for ~3 seconds. One-time
+// flash on activation, then the fog-of-war is skipped while the timer
+// counts down. Count is server-authoritative for logged-in users and
+// localStorage-authoritative for guests.
+const gadgets = {
+  light: 0,
+  lightActive: false,
+  lightTimer: 0,
+};
+let lightRevealFlash = null;  // {alpha, timer} for the on-activation flash
+
+// Pull the gadget count from the right source and refresh the HUD.
+function refreshGadgetCount() {
+  if (auth.token && auth.player) {
+    gadgets.light = (typeof auth.player.gadgets_light === 'number') ? auth.player.gadgets_light : 0;
+  } else {
+    // Guest: localStorage, default 3 for new sessions.
+    try {
+      const v = parseInt(localStorage.getItem('darklaybrinth_g_light') || '3', 10);
+      gadgets.light = Number.isFinite(v) && v >= 0 ? v : 3;
+    } catch (e) {
+      gadgets.light = 3;
+    }
+  }
+  updateGadgetHud();
+}
+
+function saveGuestGadgetCount() {
+  if (auth.token) return;  // logged-in users go through /sync
+  try { localStorage.setItem('darklaybrinth_g_light', String(gadgets.light)); } catch (e) {}
+}
+
+// Activate the light reveal gadget. Silent on failure — never disrupts gameplay.
+async function useLightReveal() {
+  if (gadgets.lightActive) return;
+  if (gadgets.light <= 0) return;
+  if (typeof isDead !== 'undefined' && isDead) return;
+  if (typeof isWon !== 'undefined' && isWon) return;
+  if (typeof inVent !== 'undefined' && inVent) return;
+
+  gadgets.light--;
+  gadgets.lightActive = true;
+  gadgets.lightTimer = 3.0;
+  lightRevealFlash = { alpha: 0.55, timer: 0.55 };
+  saveGuestGadgetCount();
+  updateGadgetHud();
+
+  // Sync to server if logged in. We update gadgets_light on the server so
+  // the next login reflects the used gadget.
+  if (auth.token) {
+    try {
+      const result = await apiCall('/sync', {
+        method: 'POST',
+        body: JSON.stringify({ gadgets_light: gadgets.light }),
+      });
+      auth.player = result.player;
+    } catch (e) {
+      // Silent — the local count is correct, server will reconcile later
+    }
+  }
+}
+
+function updateGadgetHud() {
+  const btn = document.getElementById('lightBtn');
+  const countEl = document.getElementById('lightCount');
+  if (!btn || !countEl) return;
+  countEl.textContent = gadgets.light;
+  btn.disabled = gadgets.light <= 0 || gadgets.lightActive;
+  btn.classList.toggle('armed', gadgets.lightActive);
+}
+
+// Per-frame update for the light reveal timer and the on-activation flash.
+function updateGadgetTimers(dt) {
+  if (gadgets.lightActive) {
+    gadgets.lightTimer -= dt;
+    if (gadgets.lightTimer <= 0) {
+      gadgets.lightActive = false;
+      gadgets.lightTimer = 0;
+      updateGadgetHud();
+    }
+    // Update the floating badge with remaining seconds.
+    const badge = document.getElementById('revealBadge');
+    if (badge) {
+      if (gadgets.lightActive) {
+        badge.style.display = 'block';
+        const t = badge.querySelector('.timer');
+        if (t) t.textContent = gadgets.lightTimer.toFixed(1);
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+  }
+  if (lightRevealFlash) {
+    lightRevealFlash.timer -= dt;
+    if (lightRevealFlash.timer <= 0) {
+      lightRevealFlash = null;
+    } else {
+      lightRevealFlash.alpha = (lightRevealFlash.timer / 0.55) * 0.55;
+    }
+  }
+}
+
+function drawLightRevealFlash(ctx) {
+  if (!lightRevealFlash) return;
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,250,225,' + lightRevealFlash.alpha.toFixed(3) + ')';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+}
+
+function bindGadgetEvents() {
+  const btn = document.getElementById('lightBtn');
+  if (btn) btn.addEventListener('click', useLightReveal);
+}
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c0a579bd535f6',t:'MTc4Mjk3ODQyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14c0a579bd535f6',t:'MTc4Mjk3ODQyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14d89789d2073a1',t:'MTc4Mjk5NDExOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
