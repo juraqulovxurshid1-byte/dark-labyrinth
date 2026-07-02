@@ -2275,7 +2275,12 @@ async function handleAuthSubmit() {
   try {
     if (authMode === 'register') await registerUser(username, pin);
     else await loginUser(username, pin);
-    await fetchPlayer();
+    // NOTE: no fetchPlayer() call here. loginUser/registerUser already
+    // set auth.player from the server's response. fetchPlayer is only
+    // needed on page reload (bootstrapGame → restoreSession) where we have
+    // a token but no fresh player data. Calling it here would re-query
+    // /leaderboard and could overwrite auth.player with stale cached data
+    // from a different user (Vercel edge cache doesn't vary on Authorization).
     resetGameState();  // wipe previous session's progress from globals/HUD
     updateHudForAuth();
     hideAuthModal();
