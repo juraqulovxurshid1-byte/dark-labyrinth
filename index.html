@@ -169,6 +169,13 @@ async function waitForStableViewport(stableMs=120,maxWait=2500){
 }
 let monsterProximity=0,monsterStepTimer=0,playerMoving=false;
 let deathAnimTimer=0,isDead=false,isWon=false,hbTimer=0;
+let exitProxTimer=0;
+// ── Ambient drone state ──
+let drone = null;  // null until first ensureAudio + game start
+// ── Dust particles ──
+let dustParticles = [];
+// ── Vent discovery state ──
+let ventDiscoveryPulse = [];   // per-vent timer (seconds remaining) for visual pulse
 let reviveInvincibleTimer=0, reviveFreezeTimer=0, reviveInProgress=false;
 let vents=[],inVent=false,ventMenuOpen=false,currentVentIndex=-1,ventSel=0,ventInputTimer=0;
 
@@ -424,6 +431,298 @@ function playWin(){
     osc.start(st); osc.stop(st + 1.65);
   });
 }
+// ── Exit proximity tone ──
+// A crystalline chime that pulses faster and brighter as the player nears the exit.
+// dist: cell distance to exit (0 = standing on it)
+function playExitProxTone(dist){
+  if(!audioCtx) return;
+  const t = audioCtx.currentTime;
+  // Normalize: 0 = on exit, 1 = max range (20 cells)
+  const n = Math.min(dist / 20, 1);
+  // Closer → higher pitch (440→880 Hz), louder, richer harmonics
+  const freq = 440 + 440 * (1 - n);           // 440 far → 880 close
+  const vol  = 0.04 + 0.14 * (1 - n);         // 0.04 far → 0.18 close
+  const dur  = 0.25 + 0.45 * n;               // 0.70 far → 0.25 close (shorter when close)
+
+  // Primary tone — soft sine
+  const o1 = audioCtx.createOscillator();
+  const g1 = audioCtx.createGain();
+  o1.type = 'sine';
+  o1.frequency.setValueAtTime(freq, t);
+  g1.gain.setValueAtTime(vol, t);
+  g1.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o1.connect(g1); g1.connect(audioCtx.destination);
+  o1.start(t); o1.stop(t + dur + 0.05);
+
+  // Shimmer harmonic — quiet octave-above, only when fairly close (n < 0.6)
+  if(n < 0.6){
+    const hVol = 0.03 * (1 - n/0.6);
+    const o2 = audioCtx.createOscillator();
+    const g2 = audioCtx.createGain();
+    o2.type = 'sine';
+    o2.frequency.setValueAtTime(freq * 2, t);
+    g2.gain.setValueAtTime(hVol, t);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.7);
+    o2.connect(g2); g2.connect(audioCtx.destination);
+    o2.start(t); o2.stop(t + dur * 0.7 + 0.05);
+  }
+}
+
+// ── Ambient Room Tone ──
+// A continuous drone that shifts with game state:
+//   Safe exploring  → deep, quiet hum
+//   Monster nearby  → rising tension, beating dissonance, noise widens
+//   In vent         → muffled, enclosed low-pass feel
+//   Dead            → drone fades out
+//
+// Architecture: persistent oscillators + noise, parameter-updated each frame
+// via setTargetAtTime for smooth, click-free transitions.
+
+function initDrone(){
+  if(!audioCtx || drone) return;
+  const t = audioCtx.currentTime;
+
+  // Master gain — overall drone volume
+  const master = audioCtx.createGain();
+  master.gain.setValueAtTime(0, t);
+  master.connect(audioCtx.destination);
+
+  // ── Layer 1: Base hum (two slightly-detuned sines for beating) ──
+  const base1 = audioCtx.createOscillator();
+  base1.type = 'sine';
+  base1.frequency.setValueAtTime(32, t);
+  const base1G = audioCtx.createGain();
+  base1G.gain.setValueAtTime(0.12, t);
+  base1.connect(base1G); base1G.connect(master);
+
+  const base2 = audioCtx.createOscillator();
+  base2.type = 'sine';
+  base2.frequency.setValueAtTime(33.5, t);  // 1.5Hz beating against base1
+  const base2G = audioCtx.createGain();
+  base2G.gain.setValueAtTime(0.09, t);
+  base2.connect(base2G); base2G.connect(master);
+
+  base1.start(t); base2.start(t);
+
+  // ── Layer 2: Tension oscillators (dormant until monsters are near) ──
+  // A slightly-dissonant pair that fades in with proximity
+  const tens1 = audioCtx.createOscillator();
+  tens1.type = 'sawtooth';
+  tens1.frequency.setValueAtTime(55, t);
+  const tens1G = audioCtx.createGain();
+  tens1G.gain.setValueAtTime(0, t);
+  tens1.connect(tens1G);
+
+  const tens2 = audioCtx.createOscillator();
+  tens2.type = 'sawtooth';
+  tens2.frequency.setValueAtTime(57.3, t);  // ~2.3Hz beating
+  const tens2G = audioCtx.createGain();
+  tens2G.gain.setValueAtTime(0, t);
+  tens2.connect(tens2G);
+
+  // Tension goes through a low-pass filter (darkens the sawtooth)
+  const tensFilter = audioCtx.createBiquadFilter();
+  tensFilter.type = 'lowpass';
+  tensFilter.frequency.setValueAtTime(180, t);
+  tensFilter.Q.setValueAtTime(1.5, t);
+
+  tens1G.connect(tensFilter); tens2G.connect(tensFilter);
+  tensFilter.connect(master);
+  tens1.start(t); tens2.start(t);
+
+  // ── Layer 3: Filtered noise (subtle room atmosphere) ──
+  // Create a 4-second looping noise buffer
+  const nLen = audioCtx.sampleRate * 4;
+  const nBuf = audioCtx.createBuffer(1, nLen, audioCtx.sampleRate);
+  const nData = nBuf.getChannelData(0);
+  for(let i = 0; i < nLen; i++) nData[i] = Math.random() * 2 - 1;
+
+  const noiseSrc = audioCtx.createBufferSource();
+  noiseSrc.buffer = nBuf;
+  noiseSrc.loop = true;
+
+  const noiseFilter = audioCtx.createBiquadFilter();
+  noiseFilter.type = 'bandpass';
+  noiseFilter.frequency.setValueAtTime(120, t);
+  noiseFilter.Q.setValueAtTime(0.8, t);
+
+  const noiseG = audioCtx.createGain();
+  noiseG.gain.setValueAtTime(0.025, t);
+
+  noiseSrc.connect(noiseFilter);
+  noiseFilter.connect(noiseG);
+  noiseG.connect(master);
+  noiseSrc.start(t);
+
+  // ── Vent low-pass (applied to master output when in vent) ──
+  const ventFilter = audioCtx.createBiquadFilter();
+  ventFilter.type = 'lowpass';
+  ventFilter.frequency.setValueAtTime(20000, t);  // effectively open when not in vent
+  ventFilter.Q.setValueAtTime(0.7, t);
+
+  // Rewire: master → ventFilter → destination
+  master.disconnect();
+  master.connect(ventFilter);
+  ventFilter.connect(audioCtx.destination);
+
+  // Fade in the drone master over 2 seconds
+  master.gain.setTargetAtTime(1.0, t, 0.6);
+
+  drone = {
+    master,
+    base1, base1G,
+    base2, base2G,
+    tens1, tens1G,
+    tens2, tens2G,
+    tensFilter,
+    noiseSrc, noiseFilter, noiseG,
+    ventFilter
+  };
+}
+
+// Smoothly update drone parameters based on game state.
+// Called every frame from updateHorrorEffects.
+function updateDrone(dt){
+  if(!drone || !audioCtx) return;
+  const t = audioCtx.currentTime;
+  const ramp = 0.3;  // setTargetAtTime time-constant — smooth but responsive
+
+  if(isDead){
+    // Fade everything to silence on death
+    drone.master.gain.setTargetAtTime(0, t, 0.8);
+    return;
+  }
+
+  // Master always at 1.0 when alive (ventFilter handles the muffling)
+  drone.master.gain.setTargetAtTime(1.0, t, 0.5);
+
+  const p = monsterProximity;  // 0 = safe, ~1 = very close
+
+  // ── Base hum: slightly louder & faster beating when threatened ──
+  drone.base1G.gain.setTargetAtTime(0.12 + 0.06 * p, t, ramp);
+  drone.base2G.gain.setTargetAtTime(0.09 + 0.05 * p, t, ramp);
+  // Beating speeds up: closer detuning = faster beating
+  drone.base2.frequency.setTargetAtTime(33.5 + 3.0 * p, t, ramp);
+
+  // ── Tension layer: fades in with proximity ──
+  const tensVol = Math.max(0, p - 0.1) * 0.08;  // 0 when safe, ~0.07 when close
+  drone.tens1G.gain.setTargetAtTime(tensVol, t, ramp);
+  drone.tens2G.gain.setTargetAtTime(tensVol * 0.8, t, ramp);
+  // Tension pitch rises slightly with proximity
+  drone.tens1.frequency.setTargetAtTime(55 + 25 * p, t, ramp);
+  drone.tens2.frequency.setTargetAtTime(57.3 + 25 * p, t, ramp);
+  // Filter opens to let more harmonics through when threatened
+  drone.tensFilter.frequency.setTargetAtTime(180 + 500 * p, t, ramp);
+
+  // ── Noise: widens and gets louder when threatened ──
+  drone.noiseG.gain.setTargetAtTime(0.025 + 0.06 * p, t, ramp);
+  drone.noiseFilter.frequency.setTargetAtTime(120 + 300 * p, t, ramp);
+  drone.noiseFilter.Q.setTargetAtTime(0.8 + 1.5 * p, t, ramp);
+
+  // ── Vent muffling ──
+  if(inVent){
+    drone.ventFilter.frequency.setTargetAtTime(250, t, 0.15);   // very muffled
+    drone.ventFilter.Q.setTargetAtTime(2.0, t, 0.15);
+  } else {
+    drone.ventFilter.frequency.setTargetAtTime(20000, t, 0.4);  // open
+    drone.ventFilter.Q.setTargetAtTime(0.7, t, 0.4);
+  }
+}
+
+function destroyDrone(){
+  if(!drone) return;
+  try {
+    drone.base1.stop(); drone.base2.stop();
+    drone.tens1.stop(); drone.tens2.stop();
+    drone.noiseSrc.stop();
+  } catch(e){}
+  drone = null;
+}
+
+// ── Dust Particle System ──
+// Tiny motes that spawn at the player's feet while moving.
+// Gives visual feedback that you're moving — important since footsteps are silent.
+
+const DUST_MAX = 40;            // max live particles
+const DUST_SPAWN_RATE = 12;     // particles per second while moving
+let dustSpawnAccum = 0;
+
+function spawnDustParticle(){
+  // Spawn around player's feet with slight random offset
+  const angle = Math.random() * Math.PI * 2;
+  const dist  = Math.random() * CELL * 0.35;
+  const g = Math.round(190 + Math.random() * 30);
+  const b = Math.round(80 + Math.random() * 40);
+  dustParticles.push({
+    x:  player.px + Math.cos(angle) * dist,
+    y:  player.py + Math.sin(angle) * dist,
+    vx: (Math.random() - 0.5) * 8,      // slow horizontal drift (px/s)
+    vy: -6 - Math.random() * 12,         // drift upward (px/s) — like kicked-up dust
+    life: 0,
+    maxLife: 0.5 + Math.random() * 0.6,  // 0.5–1.1 seconds
+    size: 1.2 + Math.random() * 1.8,     // pixel radius
+    brightness: 0.3 + Math.random() * 0.3, // base alpha multiplier
+    color: `rgb(255,${g},${b})`            // warm torchlit tone (fixed per particle)
+  });
+}
+
+function updateDustParticles(dt){
+  // Spawn new particles while moving (not in vent, not dead)
+  if(playerMoving && !isDead && !isWon && !inVent){
+    dustSpawnAccum += DUST_SPAWN_RATE * dt;
+    while(dustSpawnAccum >= 1 && dustParticles.length < DUST_MAX){
+      spawnDustParticle();
+      dustSpawnAccum -= 1;
+    }
+    if(dustSpawnAccum >= 1) dustSpawnAccum = 0; // cap overflow
+  } else {
+    dustSpawnAccum = 0;
+  }
+
+  // Update existing particles
+  for(let i = dustParticles.length - 1; i >= 0; i--){
+    const p = dustParticles[i];
+    p.life += dt;
+    if(p.life >= p.maxLife){
+      dustParticles.splice(i, 1);
+      continue;
+    }
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 4 * dt;  // gentle gravity — arc upward then settle
+  }
+}
+
+function drawDustParticles(ctx){
+  const ppx = player.px, ppy = player.py;
+  const torchR = LIGHT_RADIUS * CELL;
+  for(const p of dustParticles){
+    // Only draw if within torch radius
+    const dx = p.x - ppx, dy = p.y - ppy;
+    const dist = Math.hypot(dx, dy);
+    if(dist > torchR) continue;
+
+    // Fade in quickly, fade out over last 40% of life
+    const lifeRatio = p.life / p.maxLife;
+    let alpha = p.brightness;
+    if(lifeRatio < 0.1) alpha *= lifeRatio / 0.1;                  // fade in
+    else if(lifeRatio > 0.6) alpha *= 1 - (lifeRatio - 0.6) / 0.4; // fade out
+
+    // Also dim with distance from torch center
+    const distFade = 1 - (dist / torchR);
+    alpha *= distFade;
+
+    if(alpha < 0.01) continue;
+
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * (1 - lifeRatio * 0.3), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
 function playVentExitSound(){
   if(!audioCtx) return;
   const t = audioCtx.currentTime;
@@ -447,6 +746,56 @@ function playVentExitSound(){
   filter.connect(gain);
   gain.connect(audioCtx.destination);
   noise.start(t);
+}
+
+// ── Vent discovery chime ──
+// Played the first time a vent comes into torch range.
+// A metallic shimmer: resonant filtered noise + a soft sine bell.
+function playVentDiscoverySound(){
+  if(!audioCtx) return;
+  const t = audioCtx.currentTime;
+
+  // Layer 1: Air-through-grate noise — bandpass filter sweep
+  const bufLen = Math.floor(audioCtx.sampleRate * 0.45);
+  const buf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for(let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+
+  const bp = audioCtx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.setValueAtTime(2200, t);
+  bp.frequency.exponentialRampToValueAtTime(600, t + 0.35);
+  bp.Q.setValueAtTime(5, t);
+
+  const ng = audioCtx.createGain();
+  ng.gain.setValueAtTime(0.18, t);
+  ng.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+
+  src.connect(bp); bp.connect(ng); ng.connect(audioCtx.destination);
+  src.start(t); src.stop(t + 0.45);
+
+  // Layer 2: Teal chime — a soft sine with harmonics at the vent's color identity
+  // 660 Hz ≈ E5, a bright but gentle metallic ping
+  const bell = audioCtx.createOscillator();
+  bell.type = 'sine';
+  bell.frequency.setValueAtTime(660, t);
+  const bg = audioCtx.createGain();
+  bg.gain.setValueAtTime(0.15, t);
+  bg.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+  bell.connect(bg); bg.connect(audioCtx.destination);
+  bell.start(t); bell.stop(t + 0.6);
+
+  // Quiet octave harmonic for shimmer
+  const bell2 = audioCtx.createOscillator();
+  bell2.type = 'sine';
+  bell2.frequency.setValueAtTime(1320, t);
+  const bg2 = audioCtx.createGain();
+  bg2.gain.setValueAtTime(0.05, t);
+  bg2.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+  bell2.connect(bg2); bg2.connect(audioCtx.destination);
+  bell2.start(t); bell2.stop(t + 0.4);
 }
 
 // ═══ MAZE GENERATION — Recursive Backtracker + loop punching ═══
@@ -549,6 +898,11 @@ function initLevel(){
   isDead=false; isWon=false; deathAnimTimer=0;
   reviveInvincibleTimer=0; reviveFreezeTimer=0; reviveInProgress=false;
   monsterProximity=0;
+  exitProxTimer=0;
+  destroyDrone();   // will be re-initialized by updateHorrorEffects on first frame
+  dustParticles = [];
+  dustSpawnAccum = 0;
+  ventDiscoveryPulse = [];
   playerStepTimer=0;
 
   banner.textContent='LEVEL '+level;
@@ -815,13 +1169,13 @@ function placeVents(){
     if(vents.length>=NUM_VENTS) break;
     let ok=true;
     for(const v of vents){ if(Math.hypot(v.x-x,v.y-y)<minDist){ ok=false; break; } }
-    if(ok) vents.push({x,y});
+    if(ok) vents.push({x,y,discovered:false});
   }
   let guard=0;
   while(vents.length<NUM_VENTS && cells.length && guard<2000){
     guard++;
     const [x,y]=cells[Math.floor(Math.random()*cells.length)];
-    if(!vents.some(v=>v.x===x&&v.y===y)) vents.push({x,y});
+    if(!vents.some(v=>v.x===x&&v.y===y)) vents.push({x,y,discovered:false});
   }
 }
 function tryToggleVent(){
@@ -869,13 +1223,22 @@ function roundRect(c,x,y,w,h,r){
   c.arcTo(x,y,x+w,y,r);
   c.closePath();
 }
-function drawVent(c,x,y){
+function drawVent(c,x,y,pulse){
   const m=3;
   c.save();
+  // Discovery pulse: briefly expands and brightens the teal glow
+  let glowRadius = CELL * 0.85;
+  let glowAlpha  = 0.20;
+  if(pulse > 0){
+    // Ease out: strong at start, fading over 1.2s
+    const p = pulse / 1.2;   // 1.0 → 0.0
+    glowRadius = CELL * (0.85 + 1.8 * p);
+    glowAlpha  = 0.20 + 0.55 * p;
+  }
   // soft teal glow so vents are discoverable in the torch light
-  const g=c.createRadialGradient(x+CELL/2,y+CELL/2,1,x+CELL/2,y+CELL/2,CELL*0.85);
-  g.addColorStop(0,'rgba(70,165,175,0.20)'); g.addColorStop(1,'rgba(70,165,175,0)');
-  c.fillStyle=g; c.fillRect(x-CELL/2,y-CELL/2,CELL*2,CELL*2);
+  const g=c.createRadialGradient(x+CELL/2,y+CELL/2,1,x+CELL/2,y+CELL/2,glowRadius);
+  g.addColorStop(0,`rgba(70,165,175,${glowAlpha.toFixed(3)})`); g.addColorStop(1,'rgba(70,165,175,0)');
+  c.fillStyle=g; c.fillRect(x-CELL*1.5,y-CELL*1.5,CELL*4,CELL*4);
   // metal frame with bevel
   c.fillStyle='#33343b'; c.fillRect(x+m,y+m,CELL-2*m,CELL-2*m);
   c.fillStyle='rgba(255,255,255,0.13)';
@@ -991,7 +1354,11 @@ function drawGame(){
   ctx.restore();
 
   // Vents
-  for(const v of vents) drawVent(ctx,v.x*CELL,v.y*CELL);
+  for(let i = 0; i < vents.length; i++){
+    const v = vents[i];
+    const pulse = (ventDiscoveryPulse[i] > 0) ? ventDiscoveryPulse[i] : 0;
+    drawVent(ctx, v.x*CELL, v.y*CELL, pulse);
+  }
 
   // Monster sprite — visible ONLY when within torch range AND there's a clear
   // line of sight to it. Walls block vision, so the monster is hidden behind walls.
@@ -1039,18 +1406,27 @@ function drawGame(){
   } else {
     outOfSightTimer = 0;
   }
-  // Fog of war
-  const fog=ctx.createRadialGradient(ppx,ppy,0,ppx,ppy,LIGHT_RADIUS*CELL);
+  // ── Torch flicker: calm when still, erratic when moving ──
+  const flickerTime = Date.now();
+  const flickerSpeed  = playerMoving ? 65 : 110;   // faster oscillation while walking
+  const flickerAmp    = playerMoving ? 0.30 : 0.12; // much wilder amplitude
+  const flickerVal    = Math.sin(flickerTime / flickerSpeed);
+
+  // Fog of war — torch guttering shrinks the light slightly when moving
+  const lightMod      = playerMoving ? -0.25 : 0;   // cells of radius reduction
+  const fogRadius     = (LIGHT_RADIUS + lightMod + flickerAmp * flickerVal) * CELL;
+  const fog=ctx.createRadialGradient(ppx,ppy,0,ppx,ppy,fogRadius);
   fog.addColorStop(0,'rgba(0,0,0,0)');
   fog.addColorStop(0.5,'rgba(0,0,0,0)');
   fog.addColorStop(0.72,'rgba(0,0,0,0.68)');
   fog.addColorStop(1,'rgba(0,0,0,1)');
   ctx.fillStyle=fog; ctx.fillRect(0,0,vW,vH);
 
-  // Torch warm tint
+  // Torch warm tint — more vivid and flickery while moving
+  const tintFlicker = flickerAmp * flickerVal;
   const tg=ctx.createRadialGradient(ppx,ppy,0,ppx,ppy,CELL*LIGHT_RADIUS);
-  tg.addColorStop(0,'rgba(255,150,30,0.15)');
-  tg.addColorStop(0.55,'rgba(255,100,10,0.05)');
+  tg.addColorStop(0,`rgba(255,150,30,${(0.15 + tintFlicker * 0.15).toFixed(3)})`);
+  tg.addColorStop(0.55,`rgba(255,100,10,${(0.05 + tintFlicker * 0.06).toFixed(3)})`);
   tg.addColorStop(1,'rgba(0,0,0,0)');
   ctx.fillStyle=tg; ctx.fillRect(0,0,vW,vH);
 
@@ -1060,13 +1436,19 @@ function drawGame(){
   ctx.shadowBlur=22; ctx.shadowColor='#ffaa22';
   const ps=CELL*0.9;
   drawSprite(ctx,playerImg,ppx,ppy,ps,ps,player.facing);
-  // torch flicker glow
-  ctx.globalAlpha=0.35+0.12*Math.sin(Date.now()/110);
-  const fg2=ctx.createRadialGradient(ppx,ppy,0,ppx,ppy,CELL*0.85);
+  // torch glow — erratic when moving, steady when still
+  const glowAmp = playerMoving ? 0.30 : 0.12;
+  const glowSpeed = playerMoving ? 65 : 110;
+  ctx.globalAlpha = 0.35 + glowAmp * Math.sin(Date.now() / glowSpeed);
+  const glowRadius = playerMoving ? CELL * 0.92 : CELL * 0.85;
+  const fg2=ctx.createRadialGradient(ppx,ppy,0,ppx,ppy,glowRadius);
   fg2.addColorStop(0,'rgba(255,200,80,0.35)'); fg2.addColorStop(1,'rgba(255,150,30,0)');
-  ctx.fillStyle=fg2; ctx.beginPath(); ctx.arc(ppx,ppy,CELL*0.85,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=fg2; ctx.beginPath(); ctx.arc(ppx,ppy,glowRadius,0,Math.PI*2); ctx.fill();
   ctx.restore();
   }
+
+  // ── Dust particles ── (drawn after fog/torch so they're lit within torch range)
+  if(!inVent) drawDustParticles(ctx);
 
   // Revive protection glow
   if(reviveInvincibleTimer>0&&!isDead&&!inVent){
@@ -1122,7 +1504,7 @@ function drawMinimap(){
   mmCtx.textAlign='center'; mmCtx.textBaseline='middle';
   const ventFont=Math.max(8,Math.round(sz*2.6));
   vents.forEach((v,i)=>{
-    if(!visited[v.y][v.x]) return;
+    if(!visited[v.y][v.x] && !v.discovered) return;
     const vxp=R+fs*(v.x-gx), vyp=R+fs*(v.y-gy);
     const here=inVent&&currentVentIndex===i;
     // labeled dot
@@ -1198,7 +1580,29 @@ function updateHorrorEffects(dt){
   const p=monsterProximity;
   if(p>0.08){
     const pulse=0.5+0.5*Math.sin(Date.now()/170*(1+p*3));
-    hb.style.boxShadow=`inset 0 0 ${68*p}px rgba(255,0,0,${0.55*p*pulse})`;
+
+    // ── Directional vignette bias ──
+    // Find nearest monster so the red glow leans toward where it actually is
+    let nearDx=0, nearDy=0, nearDist=Infinity;
+    for(const m of monsters){
+      const d=Math.hypot(m.px-player.px, m.py-player.py);
+      if(d<nearDist){ nearDist=d; nearDx=m.px-player.px; nearDy=m.py-player.py; }
+    }
+    const dirLen=Math.hypot(nearDx,nearDy);
+    const maxOff=Math.round(55*p);  // pixel offset scales with proximity
+    let offX=0, offY=0;
+    if(dirLen>1){
+      // Inset shadow offset is inverted: negative X → glow on right side, etc.
+      offX=-Math.round((nearDx/dirLen)*maxOff);
+      offY=-Math.round((nearDy/dirLen)*maxOff);
+    }
+
+    // Layer 1: directional bias toward the threat
+    // Layer 2: subtle uniform base so the opposite side isn't pitch-black
+    hb.style.boxShadow=`
+      inset ${offX}px ${offY}px ${68*p}px rgba(255,0,0,${(0.55*p*pulse).toFixed(3)}),
+      inset 0 0 ${40*p}px rgba(255,0,0,${(0.18*p*pulse).toFixed(3)})
+    `;
     hbTimer-=dt;
     if(hbTimer<=0){hbTimer=Math.max(0.20,1.05-p*0.92);playHeartbeat(p);}
   } else {
@@ -1209,6 +1613,60 @@ function updateHorrorEffects(dt){
   const el=document.getElementById('stepsDisplay');
   el.textContent=meter;
   el.style.color=`rgb(${Math.round(80+175*p)},${Math.round(85-85*p)},${Math.round(84-84*p)})`;
+
+  // ── Ambient room tone ──
+  // Initialize drone on first call (needs audioCtx ready)
+  if(!drone && audioCtx) initDrone();
+  updateDrone(dt);
+
+  // ── Dust particles ──
+  updateDustParticles(dt);
+
+  // ── Vent discovery cue ──
+  // Detect when an undiscovered vent enters torch range for the first time.
+  // Keep pulse array in sync with vents array (handles level transitions).
+  if(ventDiscoveryPulse.length !== vents.length){
+    ventDiscoveryPulse = vents.map(() => 0);
+  }
+  // Tick down existing pulses (always, even when dead/in vent — visual fadeout)
+  for(let i = 0; i < ventDiscoveryPulse.length; i++){
+    if(ventDiscoveryPulse[i] > 0) ventDiscoveryPulse[i] -= dt;
+  }
+  // Discovery detection only when alive and exploring
+  if(!isDead && !isWon && !inVent){
+    for(let i = 0; i < vents.length; i++){
+      const v = vents[i];
+      if(v.discovered) continue;
+      const dist = Math.hypot(player.x - v.x, player.y - v.y);
+      if(dist < LIGHT_RADIUS + 0.5 && lineOfSight(player.x, player.y, v.x, v.y)){
+        v.discovered = true;
+        ventDiscoveryPulse[i] = 1.2;   // visual pulse duration
+        playVentDiscoverySound();
+      }
+    }
+  }
+
+  // ── Exit proximity tone ──
+  // Chimes faster and brighter as the player approaches the exit.
+  // Only active when alive, not in a vent, and within sensing range.
+  if(!isDead && !isWon && !inVent){
+    const exitDist = Math.hypot(player.x - (mazeW-2), player.y - (mazeH-2));
+    const SENSE_RANGE = 20;  // cells — beyond this, silence
+    if(exitDist < SENSE_RANGE){
+      // Interval: 3.0s far → 0.7s very close (exponential curve for drama)
+      const n = exitDist / SENSE_RANGE;  // 0=on exit, 1=at edge of range
+      const interval = 0.7 + 2.3 * n * n;
+      exitProxTimer -= dt;
+      if(exitProxTimer <= 0){
+        exitProxTimer = interval;
+        playExitProxTone(exitDist);
+      }
+    } else {
+      exitProxTimer = 0;  // reset when out of range
+    }
+  } else {
+    exitProxTimer = 0;  // reset when dead/won/in vent
+  }
 }
 
 // ═══ COLLISION ═══
@@ -1508,5 +1966,5 @@ if(window.visualViewport){
   window.visualViewport.addEventListener('resize', ()=>resizeGame('visualViewport'));
 }
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13db9f60f275688',t:'MTc4MjgyODMzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a13e7f854c205685',t:'MTc4MjgzNjQyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a1481acb2f8bdcaa',t:'MTc4MjkzNzE1Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a14bc1df8fcf3632',t:'MTc4Mjk3NTQ1Nw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
